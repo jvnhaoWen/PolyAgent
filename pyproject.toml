@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polyagent"
+version = "0.2.0"
+description = "Concurrent Polymarket multi-agent runtime with Redis queues and real CLOB execution"
+requires-python = ">=3.10"
+dependencies = [
+  "redis>=5.0.0",
+  "py-clob-client>=0.19.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
