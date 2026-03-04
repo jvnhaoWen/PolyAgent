@@ -24,6 +24,10 @@ Each agent runs in its own loop.
 Communication uses message queues.
 
 该md文件中的思路可以根据需要更改，接口设计可以灵活改变。
+你需要创建并根据任务更新ARCHITECTURE.md TASKS.md。
+你可以访问https://docs.polymarket.com/以及下面的子页面参考api以及交易行为的设计。
+你可以访问clawhub.ai寻找现成的新闻搜索openclaw skill把他们用于该sikll的新闻、社交媒体查询。
+交易以及新闻社媒搜索需要优化、加速给用户最好的使用体验。
 
 ---
 
