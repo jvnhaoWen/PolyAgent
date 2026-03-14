@@ -1,49 +1,62 @@
-# PolyAgent Architecture
+# ARCHITECTURE
 
-## Overview
-PolyAgent 是一个长期运行（24/7）的异步多 Agent 系统：每个 Agent 在独立循环中并发运行，通过消息队列通信。
+## 1. Skill 入口与任务生命周期
 
-## Queue Layer
+- 入口命令：`poly-monitor`
+- 子命令：
+  - `new`：交互式创建任务（写入 `task.md` + `task_config.py`）
+  - `start`：拉起独立后台进程（模拟“新 OpenClaw 进程”）
+  - `list`：查看当前任务健康状态（pid/alive）
+  - `stop`：停止选中任务
+  - `run`：前台运行某任务（无限循环）
 
-- 默认使用 **Redis Streams**（`RedisMessageBus`）作为队列后端，支持跨进程/跨实例消费。
-- 可切换为 `InMemoryMessageBus` 仅用于本地调试。
-- 主题（topic）示例：`market_updates`、`news_signals`、`trade_signals`、`execution_requests`、`health`。
+任务注册表：`.poly_monitor_registry.json`
 
-## Agent Topology
+## 2. 市场模块（Market）
 
-- **MarketAgent**
-  - 轮询 Polymarket Gamma `/events`。
-  - 支持高流动性、高成交量、临近结束等组合查询并投递 `market_updates`。
+`src/polyagent/market.py`
 
-- **NewsAgent**
-  - 轮询 RSS/新闻源。
-  - 抽取关键词并映射为 tag，投递 `news_signals`。
+- 对 Gamma API 进行 offset 分页抓取（带重试、429 限流处理、重复页/空页停止条件）。
+- 原始事件落盘：`events.jsonl`
+- 过滤出可交易子市场：
+  - `acceptingOrders == true`
+  - `volume > 0`
+  - 有有效 yes/no token
+- 提取后落盘：`extracted_markets.jsonl`
+- 若无匹配市场会输出：`There is no matched market for your key words currently.`
 
-- **StrategyAgent**
-  - 消费 `news_signals` + `market_updates`。
-  - 生成 `news_arbitrage` / `liquidity_breakout` 信号并投递 `trade_signals`。
+## 3. RAG 模块
 
-- **ExecutionAgent**
-  - 消费 `execution_requests` 与 `trade_signals`。
-  - `buy/sell` 走真实 CLOB 提交流程；`split/merge` 先走模拟占位。
-  - 所有执行结果写入 `logs/trades.log`。
+`src/polyagent/rag.py`
 
-- **RiskAgent**
-  - 长期运行风控循环（当前为占位，可扩展仓位限制、回撤限制等）。
+- Embedding: `sentence-transformers/all-MiniLM-L6-v2`
+- Index: `FAISS IndexFlatIP`
+- 向量库构建输入：`extracted_markets.jsonl`
+- 向量库产出：`vector/events.faiss`, `vector/records.json`, `vector/meta.json`
+- 查询：每条推文触发一次 top-k 检索
 
-- **SchedulerAgent**
-  - 持续采集 Agent 健康状态并发布到 `health` topic。
+## 4. 推特监控模块
 
-## CLOB Trading
+`src/polyagent/runtime.py`
 
-`PolymarketClient` 使用 `py-clob-client`：
+- 使用 `twikit.Client` + cookie (`TWITTER_AUTH_TOKEN`, `TWITTER_CT0`)
+- 轮询 `get_latest_timeline`
+- 仅处理 `WATCH_USERS` 用户
+- 新推文落盘：`tweets.jsonl`
 
-1. 通过环境变量加载私钥与链参数。
-2. 构造并签名订单。
-3. 提交到 CLOB（`post_order`）。
-4. 失败时返回显式错误并保留可追溯日志。
+## 5. 决策与交易模块
 
-## Security
+- 匹配阈值：`RAG_SCORE_THRESHOLD`
+- 匹配成功后组装 prompt（包含新闻、事件、token、MAX_ASSET_USD、媒体可信度）
+- 调用 OpenClaw 命令（`OPENCLAW_COMMAND`）拿到 JSON 决策
+- 解析交易动作后执行：
+  - `buy/sell` 真实 CLOB 下单（`py-clob-client`）
+- 每次触发都写调试记录：`test/decision_records.jsonl`
+- 成功交易写审计日志：`logs/trades.jsonl`
 
-- 私钥仅可来自环境变量，禁止硬编码。
-- 日志中不记录私钥等敏感字段。
+## 6. 7*24h 持续运行与自动刷新
+
+- `run_forever()` 永不退出。
+- 双循环并发：
+  - 市场刷新循环：每 `MARKET_REFRESH_INTERVAL_SECONDS` 重建市场+向量库
+  - 推特监听循环：每 `TWITTER_POLL_INTERVAL_SECONDS` 拉取新推文并决策

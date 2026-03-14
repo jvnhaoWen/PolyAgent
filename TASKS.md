@@ -1,19 +1,21 @@
-# PolyAgent Task Board
+# TASKS
 
-## Completed
+## 已完成
 
-- [x] 构建并发多 Agent 框架（独立循环，持续运行）。
-- [x] 接入 Redis Streams 队列后端，并保留内存后端用于本地调试。
-- [x] 移除限时运行参数，运行入口默认无限循环。
-- [x] 实现 Gamma API 组合扫描。
-- [x] 改进自然语言到查询参数解析（同义词、阈值抽取、时间窗口抽取）。
-- [x] 接入真实 CLOB 下单主路径（buy/sell，基于 `py-clob-client`）。
-- [x] 保留 split/merge 占位执行并记录审计日志。
-- [x] 更新架构与运行文档。
+- [x] 完全重构为 `poly-monitor` 任务制系统。
+- [x] `poly-monitor new` 支持交互式初始化任务（tag_slug、MAX_ASSET_USD、WATCH_USERS 等）。
+- [x] 增加后台进程管理：`start/list/stop`。
+- [x] 市场抓取模块（分页+重试+限流处理+停止条件）。
+- [x] 活跃市场过滤与 token 提取（过滤 acceptingOrders=false 和 volume=0）。
+- [x] RAG 索引构建（MiniLM + FAISS）和新闻检索。
+- [x] 推特实时监控（twikit）并与市场匹配。
+- [x] OpenClaw 决策调用与交易执行链路。
+- [x] 每次触发写 `test/decision_records.jsonl` 便于测试期观察。
+- [x] 交易日志写 `logs/trades.jsonl`。
 
-## Next
+## 下一步
 
-- [ ] 接入链上 split/merge/redeem 真正执行。
-- [ ] 引入更严格的订单前风险门控（敞口、相关性、回撤）。
-- [ ] 增加 Redis consumer-group 的重试/死信队列策略。
-- [ ] 增加端到端回测与沙盒账户模拟。
+- [ ] 增加多源新闻（RSS、新华社）融合与权重策略。
+- [ ] 增加更细化的仓位和风控规则（单日上限、连续亏损熔断）。
+- [ ] 增加真实 `split/merge/redeem` 执行模块。
+- [ ] 增加 e2e 回放测试数据集。
