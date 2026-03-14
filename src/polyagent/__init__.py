@@ -1,9 +1,1 @@
-__all__ = [
-    'app',
-    'cli',
-    'runtime',
-    'tasking',
-    'market',
-    'rag',
-    'trading',
-]
+__all__ = ['app', 'cli', 'tasking', 'market', 'rag', 'runtime', 'trading']

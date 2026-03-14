@@ -1,62 +1,47 @@
 # ARCHITECTURE
 
-## 1. Skill 入口与任务生命周期
+## Prompt 驱动主流程
 
-- 入口命令：`poly-monitor`
-- 子命令：
-  - `new`：交互式创建任务（写入 `task.md` + `task_config.py`）
-  - `start`：拉起独立后台进程（模拟“新 OpenClaw 进程”）
-  - `list`：查看当前任务健康状态（pid/alive）
-  - `stop`：停止选中任务
-  - `run`：前台运行某任务（无限循环）
+- `poly-monitor new`：
+  - 展示 `task.md` 的角色与任务说明。
+  - 询问用户 `TOPIC_TAG_SLUG`、`WATCH_USERS`、`MAX_ASSET_USD` 等关键信息。
+  - 写入 `task_config.py`（其余参数保留默认）。
+- `poly-monitor run/start`：
+  - 读取 `task_config.py` 作为唯一配置源。
+  - 自动执行数据抓取、过滤、向量构建、推特监控、决策、交易。
 
-任务注册表：`.poly_monitor_registry.json`
+## 模块
 
-## 2. 市场模块（Market）
+### 1) tasking.py
+- 创建任务目录与 `task.md` / `decision.md` / `task_config.py`
+- 维护后台任务注册表与 start/list/stop
 
-`src/polyagent/market.py`
+### 2) market.py
+- 用 `TOPIC_TAG_SLUG` + `VOLUME_MIN` 调用 Gamma API
+- 分页抓取与重试
+- 过滤 `acceptingOrders=true` 且 `volume>0`
+- 产物：`filtered_acceptingOrders.jsonl`（event + child_options）
 
-- 对 Gamma API 进行 offset 分页抓取（带重试、429 限流处理、重复页/空页停止条件）。
-- 原始事件落盘：`events.jsonl`
-- 过滤出可交易子市场：
-  - `acceptingOrders == true`
-  - `volume > 0`
-  - 有有效 yes/no token
-- 提取后落盘：`extracted_markets.jsonl`
-- 若无匹配市场会输出：`There is no matched market for your key words currently.`
+### 3) rag.py
+- 模型：`sentence-transformers/all-MiniLM-L6-v2`
+- 索引：FAISS
+- 在 event 粒度进行检索，返回匹配分数
 
-## 3. RAG 模块
+### 4) runtime.py
+- 读取 task 配置并长期运行：
+  - 定时刷新市场与向量库
+  - 实时轮询 twikit
+- 每条新推文触发 RAG
+- 分数 >= `RAG_SCORE_THRESHOLD` 时：
+  - 将 tweet + event + child_options 注入 `decision.md` 模板
+  - 调用 OpenClaw，解析 JSON 决策
+  - 若 `TRADING_ENABLED`，执行真实交易
 
-`src/polyagent/rag.py`
+### 5) trading.py
+- `py-clob-client` 封装
+- 支持 market buy/sell
+- 对金额做 `MAX_ASSET_USD` 上限约束
 
-- Embedding: `sentence-transformers/all-MiniLM-L6-v2`
-- Index: `FAISS IndexFlatIP`
-- 向量库构建输入：`extracted_markets.jsonl`
-- 向量库产出：`vector/events.faiss`, `vector/records.json`, `vector/meta.json`
-- 查询：每条推文触发一次 top-k 检索
-
-## 4. 推特监控模块
-
-`src/polyagent/runtime.py`
-
-- 使用 `twikit.Client` + cookie (`TWITTER_AUTH_TOKEN`, `TWITTER_CT0`)
-- 轮询 `get_latest_timeline`
-- 仅处理 `WATCH_USERS` 用户
-- 新推文落盘：`tweets.jsonl`
-
-## 5. 决策与交易模块
-
-- 匹配阈值：`RAG_SCORE_THRESHOLD`
-- 匹配成功后组装 prompt（包含新闻、事件、token、MAX_ASSET_USD、媒体可信度）
-- 调用 OpenClaw 命令（`OPENCLAW_COMMAND`）拿到 JSON 决策
-- 解析交易动作后执行：
-  - `buy/sell` 真实 CLOB 下单（`py-clob-client`）
-- 每次触发都写调试记录：`test/decision_records.jsonl`
-- 成功交易写审计日志：`logs/trades.jsonl`
-
-## 6. 7*24h 持续运行与自动刷新
-
-- `run_forever()` 永不退出。
-- 双循环并发：
-  - 市场刷新循环：每 `MARKET_REFRESH_INTERVAL_SECONDS` 重建市场+向量库
-  - 推特监听循环：每 `TWITTER_POLL_INTERVAL_SECONDS` 拉取新推文并决策
+## 观测与调试
+- 每次触发写入：`test/decision_records.jsonl`
+- 成功下单写入：`logs/trades.jsonl`

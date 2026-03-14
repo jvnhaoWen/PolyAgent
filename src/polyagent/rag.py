@@ -7,85 +7,84 @@ from typing import Any
 
 
 @dataclass(slots=True)
-class MatchCandidate:
+class EventMatch:
     score: float
-    record: dict[str, Any]
+    event: dict[str, Any]
 
 
 class EventRAG:
     def __init__(self, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2') -> None:
         self.model_name = model_name
-        self.model = None
-        self.faiss = None
+        self._model = None
+        self._faiss = None
 
-    def _lazy_init(self) -> None:
-        if self.model is not None and self.faiss is not None:
+    def _init(self) -> None:
+        if self._model is not None:
             return
         from sentence_transformers import SentenceTransformer
         import faiss
 
-        self.model = SentenceTransformer(self.model_name)
-        self.faiss = faiss
+        self._model = SentenceTransformer(self.model_name)
+        self._faiss = faiss
 
-    def build_index(self, source_jsonl: Path, index_dir: Path) -> int:
-        self._lazy_init()
-        assert self.model is not None
-        assert self.faiss is not None
+    def build(self, events_jsonl: Path, out_dir: Path) -> int:
+        self._init()
+        assert self._model is not None
+        assert self._faiss is not None
 
-        records: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         texts: list[str] = []
-
-        with source_jsonl.open('r', encoding='utf-8') as f:
+        with events_jsonl.open('r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                r = json.loads(line)
-                text = f"{r.get('event_title', '')}. {r.get('event_description', '')}. {r.get('question', '')}".strip()
-                if not text:
+                ev = json.loads(line)
+                title = str(ev.get('title', ''))
+                desc = str(ev.get('description', ''))
+                if not (title or desc):
                     continue
-                records.append(r)
-                texts.append(text)
+                events.append(ev)
+                texts.append(f'{title}. {desc}')
 
+        out_dir.mkdir(parents=True, exist_ok=True)
         if not texts:
-            index_dir.mkdir(parents=True, exist_ok=True)
-            (index_dir / 'records.json').write_text('[]', encoding='utf-8')
+            (out_dir / 'events.json').write_text('[]', encoding='utf-8')
             return 0
 
-        emb = self.model.encode(texts, convert_to_numpy=True, normalize_embeddings=True).astype('float32')
-        index = self.faiss.IndexFlatIP(emb.shape[1])
+        emb = self._model.encode(texts, convert_to_numpy=True, normalize_embeddings=True).astype('float32')
+        index = self._faiss.IndexFlatIP(emb.shape[1])
         index.add(emb)
 
-        index_dir.mkdir(parents=True, exist_ok=True)
-        self.faiss.write_index(index, str(index_dir / 'events.faiss'))
-        (index_dir / 'records.json').write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding='utf-8')
-        (index_dir / 'meta.json').write_text(
-            json.dumps({'model_name': self.model_name, 'count': len(records)}, ensure_ascii=False, indent=2),
+        self._faiss.write_index(index, str(out_dir / 'events.faiss'))
+        (out_dir / 'events.json').write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding='utf-8')
+        (out_dir / 'meta.json').write_text(
+            json.dumps({'model_name': self.model_name, 'count': len(events)}, ensure_ascii=False, indent=2),
             encoding='utf-8',
         )
-        return len(records)
+        return len(events)
 
-    def search(self, index_dir: Path, query: str, top_k: int = 5) -> list[MatchCandidate]:
-        self._lazy_init()
-        assert self.model is not None
-        assert self.faiss is not None
+    def search(self, vector_dir: Path, text: str, top_k: int = 5) -> list[EventMatch]:
+        self._init()
+        assert self._model is not None
+        assert self._faiss is not None
 
-        index_path = index_dir / 'events.faiss'
-        records_path = index_dir / 'records.json'
-        if not index_path.exists() or not records_path.exists():
+        index_path = vector_dir / 'events.faiss'
+        events_path = vector_dir / 'events.json'
+        if not index_path.exists() or not events_path.exists():
             return []
 
-        index = self.faiss.read_index(str(index_path))
-        records = json.loads(records_path.read_text(encoding='utf-8'))
-        if not records:
+        events = json.loads(events_path.read_text(encoding='utf-8'))
+        if not events:
             return []
 
-        emb = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype('float32')
-        scores, indices = index.search(emb, top_k)
+        index = self._faiss.read_index(str(index_path))
+        q = self._model.encode([text], convert_to_numpy=True, normalize_embeddings=True).astype('float32')
+        scores, idxs = index.search(q, top_k)
 
-        output: list[MatchCandidate] = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(records):
+        matches: list[EventMatch] = []
+        for score, idx in zip(scores[0], idxs[0]):
+            if idx < 0 or idx >= len(events):
                 continue
-            output.append(MatchCandidate(score=float(score), record=records[idx]))
-        return output
+            matches.append(EventMatch(score=float(score), event=events[idx]))
+        return matches
