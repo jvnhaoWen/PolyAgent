@@ -23,7 +23,8 @@
 - 对推文做 event 粒度召回
 
 ### decision.py
-- 构建动态 prompt（市场详情 + 新闻 + 风控）
+- 使用 `DEFAULT_DECISION_TEMPLATE`
+- 每次触发动态注入：市场详情 + 新闻信息 + config 信息
 - 核心调用：`openclaw agent --message "<decision prompt>"`
 
 ### runtime.py

@@ -1,7 +1,7 @@
 # TASKS
 
 ## 已完成
-- [x] 决策逻辑在 `decision.py` 中集中管理
+- [x] 决策逻辑在 `decision.py` 中集中管理（使用默认模板 + 动态注入）
 - [x] OpenClaw 交互统一为 `openclaw agent --message <decision prompt>`
 - [x] `task_config.py` 成为唯一配置源
 - [x] `new` 阶段对 task_config 每一项进行交互初始化（支持回车默认）

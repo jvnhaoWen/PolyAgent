@@ -14,27 +14,6 @@ from typing import Any
 REGISTRY_PATH = Path('.poly_monitor_registry.json')
 TASKS_ROOT = Path('tasks')
 
-DECISION_MD = """你是一个专业、谨慎但果断的 Polymarket 交易 Agent。你已经具备并可以直接调用 Polymarket 下单 skill。
-
-系统传入的新闻已经过可信来源筛选与相关新闻匹配，你可以信任其真实性与相关性。你的任务是根据这些新闻，在给定候选市场中判断是否存在足以下单的目标。
-
-候选市场如下：
-{polymarket市场详情}
-
-相关新闻如下：
-{新闻信息}
-
-规则：
-1. 保持谨慎，只在新闻与某个候选市场直接相关，且足以证明该市场对应事件已经发生或已经不可能发生、已被权威确认，或已进入可以被市场迅速定价的明确事实状态时才下单。
-2. 不因评论、猜测、间接分析、情绪表达或未证实信息下单。
-3. 一旦信息足以证明事件可以结算，应立即果断调用下单 skill 执行交易，不要只给建议，不要输出交易计划。
-4. 必须根据 market question 和description本身的语义判断买入 YES 还是 NO；clobTokenIds 顺序固定为 yes 在前、no 在后。
-5. 只选择一个最匹配的市场下单。
-6. 下单金额不少于 {min_trade_usdc} USDC，不高于 {max_trade_usdc} USDC。
-
-如果信息不足以支持明确交易，就放弃本次下单；如果信息已经足够明确，就立即执行交易。
-"""
-
 TASK_CONFIG_TEMPLATE = """TASK_NAME = {task_name!r}
 MAX_ASSET_USD = {max_asset_usd}
 MIN_TRADE_USDC = {min_trade_usdc}
@@ -123,7 +102,6 @@ def create_task_interactive() -> Path:
     (task_dir / 'logs').mkdir(parents=True, exist_ok=True)
     (task_dir / 'test').mkdir(parents=True, exist_ok=True)
 
-    (task_dir / 'decision.md').write_text(DECISION_MD, encoding='utf-8')
     (task_dir / 'task_config.py').write_text(
         TASK_CONFIG_TEMPLATE.format(
             task_name=task_name,

@@ -8,7 +8,7 @@
 2. 用配置抓取市场（Gamma API）并过滤活跃市场
 3. 构建 MiniLM + FAISS 向量库
 4. 监控推特账号新消息
-5. RAG 分数达到阈值后，把市场+新闻注入 `decision.md`
+5. RAG 分数达到阈值后，使用 DEFAULT_DECISION_TEMPLATE 动态注入市场/新闻/config
 6. 调用：`openclaw agent --message "<decision prompt>"`
 
 > 与 OpenClaw 的真实交互只有上面这一步。

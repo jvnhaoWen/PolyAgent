@@ -24,7 +24,6 @@ class TaskRuntimePaths:
     vector_dir: Path
     decision_records_jsonl: Path
     runtime_log_jsonl: Path
-    decision_md: Path
 
 
 class PolyMonitorRuntime:
@@ -42,7 +41,6 @@ class PolyMonitorRuntime:
             vector_dir=task_dir / 'vector',
             decision_records_jsonl=task_dir / 'test' / 'decision_records.jsonl',
             runtime_log_jsonl=task_dir / 'logs' / 'runtime_events.jsonl',
-            decision_md=task_dir / 'decision.md',
         )
         self.rag = EventRAG('sentence-transformers/all-MiniLM-L6-v2')
 
@@ -116,15 +114,13 @@ class PolyMonitorRuntime:
             return
 
         best = matched[0]
-        template_text = self.paths.decision_md.read_text(encoding='utf-8') if self.paths.decision_md.exists() else None
-
         result = await asyncio.to_thread(
             run_decision,
             tweet,
             best.event,
             float(self.cfg.get('MIN_TRADE_USDC', 5)),
             float(self.cfg.get('MAX_TRADE_USDC', self.cfg.get('MAX_ASSET_USD', 10))),
-            template_text,
+            self.cfg,
             self.cfg.get('OPENCLAW_COMMAND', ['openclaw', 'agent', '--message']),
         )
 

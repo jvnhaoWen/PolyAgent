@@ -14,7 +14,6 @@ poly-monitor new
 ```
 
 `new` 会写入：
-- `tasks/<task_name>/decision.md`
 - `tasks/<task_name>/task_config.py`
 
 如果你在输入时直接回车，将使用默认值，例如：

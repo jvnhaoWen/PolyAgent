@@ -39,7 +39,6 @@ def _normalize_child_options(event: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(child_options, list):
         return child_options
 
-    # Backward compatibility: if event has raw `markets` list.
     markets = event.get('markets', [])
     normalized: list[dict[str, Any]] = []
     for m in markets:
@@ -76,22 +75,39 @@ def build_polymarket_details(event: dict[str, Any]) -> str:
     return '\n'.join(lines)
 
 
+def _build_config_context(config_info: dict[str, Any] | None) -> str:
+    cfg = config_info or {}
+    payload = {
+        'task_name': cfg.get('TASK_NAME'),
+        'topic_tag_slug': cfg.get('TOPIC_TAG_SLUG'),
+        'trusted_media': cfg.get('TRUSTED_MEDIA', []),
+        'rag_score_threshold': cfg.get('RAG_SCORE_THRESHOLD'),
+        'decision_enabled': cfg.get('DECISION_ENABLED'),
+        'trading_enabled': cfg.get('TRADING_ENABLED'),
+        'watch_users': cfg.get('WATCH_USERS', []),
+        'min_trade_usdc': cfg.get('MIN_TRADE_USDC'),
+        'max_trade_usdc': cfg.get('MAX_TRADE_USDC'),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def render_decision_prompt(
     tweet: dict[str, Any],
     event: dict[str, Any],
     min_trade_usdc: float,
     max_trade_usdc: float,
-    template_text: str | None = None,
+    config_info: dict[str, Any] | None = None,
 ) -> str:
-    template = template_text or DEFAULT_DECISION_TEMPLATE
     details = build_polymarket_details(event)
     news_text = json.dumps(tweet, ensure_ascii=False, indent=2)
 
-    prompt = template.replace('{polymarket市场详情}', details)
+    prompt = DEFAULT_DECISION_TEMPLATE.replace('{polymarket市场详情}', details)
     prompt = prompt.replace('{新闻信息}', news_text)
     prompt = prompt.replace('{min_trade_usdc}', str(min_trade_usdc))
     prompt = prompt.replace('{max_trade_usdc}', str(max_trade_usdc))
-    return prompt
+
+    config_context = _build_config_context(config_info)
+    return f"{prompt}\n\n附加配置上下文：\n{config_context}"
 
 
 def call_openclaw(prompt: str, command: list[str] | None = None) -> str:
@@ -110,9 +126,9 @@ def run_decision(
     event: dict[str, Any],
     min_trade_usdc: float,
     max_trade_usdc: float,
-    template_text: str | None = None,
+    config_info: dict[str, Any] | None = None,
     openclaw_command: list[str] | None = None,
 ) -> DecisionResult:
-    prompt = render_decision_prompt(tweet, event, min_trade_usdc, max_trade_usdc, template_text)
+    prompt = render_decision_prompt(tweet, event, min_trade_usdc, max_trade_usdc, config_info)
     response = call_openclaw(prompt, openclaw_command)
     return DecisionResult(prompt=prompt, response=response)
