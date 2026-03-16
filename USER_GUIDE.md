@@ -7,14 +7,13 @@ pip install -e .
 poly-monitor --help
 ```
 
-## 2. 创建任务（会交互询问每个配置项）
+## 2. 创建任务（交互询问每个配置项）
 
 ```bash
 poly-monitor new
 ```
 
 `new` 会写入：
-- `tasks/<task_name>/task.md`
 - `tasks/<task_name>/decision.md`
 - `tasks/<task_name>/task_config.py`
 
@@ -71,12 +70,8 @@ poly-monitor stop --task <task_name>
 openclaw agent --message "<decision prompt>"
 ```
 
-本项目只负责：构建和注入 `decision prompt`，并记录结果。
+## 6. 运行日志
 
-## 6. 输出文件
-
-- `data/events.jsonl`: 原始事件
-- `data/filtered_acceptingOrders.jsonl`: 过滤后的事件+子市场
 - `data/tweets.jsonl`: 抓到的推文
-- `vector/`: FAISS 索引与事件映射
-- `test/decision_records.jsonl`: 每次触发的调试记录（测试期重点）
+- `logs/runtime_events.jsonl`: 新闻与决策摘要日志（新增）
+- `test/decision_records.jsonl`: 每次触发的完整调试记录

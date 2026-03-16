@@ -23,7 +23,7 @@ class TaskRuntimePaths:
     last_seen_json: Path
     vector_dir: Path
     decision_records_jsonl: Path
-    task_md: Path
+    runtime_log_jsonl: Path
     decision_md: Path
 
 
@@ -41,7 +41,7 @@ class PolyMonitorRuntime:
             last_seen_json=task_dir / 'data' / 'last_seen.json',
             vector_dir=task_dir / 'vector',
             decision_records_jsonl=task_dir / 'test' / 'decision_records.jsonl',
-            task_md=task_dir / 'task.md',
+            runtime_log_jsonl=task_dir / 'logs' / 'runtime_events.jsonl',
             decision_md=task_dir / 'decision.md',
         )
         self.rag = EventRAG('sentence-transformers/all-MiniLM-L6-v2')
@@ -84,6 +84,16 @@ class PolyMonitorRuntime:
     async def process_news(self, tweet: dict[str, Any]) -> None:
         self.cfg = load_task_config(self.paths.task_dir)
 
+        logging.info('NEWS: user=%s tweet_id=%s text=%s', tweet.get('user'), tweet.get('tweet_id'), tweet.get('text'))
+        self._append_jsonl(
+            self.paths.runtime_log_jsonl,
+            {
+                'time': datetime.now(timezone.utc).isoformat(),
+                'type': 'news',
+                'tweet': tweet,
+            },
+        )
+
         threshold = float(self.cfg.get('RAG_SCORE_THRESHOLD', 0.70))
         matches = await asyncio.to_thread(self.rag.search, self.paths.vector_dir, tweet.get('text', ''), 5)
         matched = [m for m in matches if m.score >= threshold]
@@ -116,6 +126,23 @@ class PolyMonitorRuntime:
             float(self.cfg.get('MAX_TRADE_USDC', self.cfg.get('MAX_ASSET_USD', 10))),
             template_text,
             self.cfg.get('OPENCLAW_COMMAND', ['openclaw', 'agent', '--message']),
+        )
+
+        decision_summary = {
+            'triggered': True,
+            'event_id': best.event.get('event_id'),
+            'event_title': best.event.get('title'),
+            'score': best.score,
+            'openclaw_response': result.response,
+        }
+        logging.info('DECISION: %s', json.dumps(decision_summary, ensure_ascii=False))
+        self._append_jsonl(
+            self.paths.runtime_log_jsonl,
+            {
+                'time': datetime.now(timezone.utc).isoformat(),
+                'type': 'decision',
+                **decision_summary,
+            },
         )
 
         row['prompt'] = result.prompt
@@ -183,11 +210,7 @@ class PolyMonitorRuntime:
             await asyncio.sleep(poll_interval)
 
     async def run_forever(self) -> None:
-        task_text = self.paths.task_md.read_text(encoding='utf-8') if self.paths.task_md.exists() else ''
-        logging.info('task.md loaded for %s: %s', self.task_name, task_text)
-
         await self.refresh_market_and_vectors()
-        refresh_interval = int(self.cfg.get('MARKET_REFRESH_INTERVAL_SECONDS', 86400))
 
         async def refresh_loop() -> None:
             while True:

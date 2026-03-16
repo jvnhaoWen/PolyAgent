@@ -2,14 +2,14 @@
 
 ## 目标
 将系统变为 prompt-first：
-- task 负责参数与上下文
+- task 负责参数与上下文（task_config.py）
 - decision.py 负责构建最终 prompt 并调用 OpenClaw
-- trading 逻辑由 OpenClaw skill 自己执行（本项目解耦）
+- 本项目不直接耦合交易执行模块
 
 ## 模块
 
 ### tasking.py
-- `new`：展示 task.md，逐项询问配置，写入 task_config.py
+- `new`：逐项询问配置，写入 task_config.py
 - `start/list/stop`：任务进程管理
 
 ### market.py
@@ -30,8 +30,9 @@
 - 读取 task_config.py（唯一配置源）
 - 周期刷新市场与向量
 - 推特实时轮询
-- 触发阈值后调用 decision.py
-- 每次触发写入 `test/decision_records.jsonl`
+- 收到新闻时打印并写入 `logs/runtime_events.jsonl`
+- 决策结果（是否触发、命中事件、回复摘要）写入 `logs/runtime_events.jsonl`
+- 完整触发上下文写入 `test/decision_records.jsonl`
 
 ## 配置更新
 - 任务 stop 后再 start/run 会重新读取 task_config.py

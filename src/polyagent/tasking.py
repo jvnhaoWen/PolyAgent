@@ -14,8 +14,6 @@ from typing import Any
 REGISTRY_PATH = Path('.poly_monitor_registry.json')
 TASKS_ROOT = Path('tasks')
 
-TASK_MD = """你是一个polymarket交易agent，你有在polymarket进行下单购买的能力，能根据提供的市场和新闻信息以及你自己的判断做出是否购买某一个事件特定头寸的决定。你现在需要询问用户task_config.py当中的信息来完成配置。"""
-
 DECISION_MD = """你是一个专业、谨慎但果断的 Polymarket 交易 Agent。你已经具备并可以直接调用 Polymarket 下单 skill。
 
 系统传入的新闻已经过可信来源筛选与相关新闻匹配，你可以信任其真实性与相关性。你的任务是根据这些新闻，在给定候选市场中判断是否存在足以下单的目标。
@@ -96,10 +94,6 @@ def _input_bool(prompt: str, default: bool) -> bool:
 
 
 def create_task_interactive() -> Path:
-    print('\n--- task.md ---')
-    print(TASK_MD)
-    print('---------------\n')
-
     task_name = _input_default('TASK_NAME', 'iran_fast_reaction')
     tag_slug = _input_default('TOPIC_TAG_SLUG', 'iran')
 
@@ -129,7 +123,6 @@ def create_task_interactive() -> Path:
     (task_dir / 'logs').mkdir(parents=True, exist_ok=True)
     (task_dir / 'test').mkdir(parents=True, exist_ok=True)
 
-    (task_dir / 'task.md').write_text(TASK_MD, encoding='utf-8')
     (task_dir / 'decision.md').write_text(DECISION_MD, encoding='utf-8')
     (task_dir / 'task_config.py').write_text(
         TASK_CONFIG_TEMPLATE.format(

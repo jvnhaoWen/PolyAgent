@@ -4,7 +4,7 @@
 
 ## 核心流程
 
-1. `poly-monitor new` 创建任务，并通过交互写 `task_config.py`
+1. `poly-monitor new` 交互创建任务并写入 `task_config.py`
 2. 用配置抓取市场（Gamma API）并过滤活跃市场
 3. 构建 MiniLM + FAISS 向量库
 4. 监控推特账号新消息

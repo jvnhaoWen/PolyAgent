@@ -11,7 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog='poly-monitor', description='PolyAgent task manager')
     sub = p.add_subparsers(dest='command', required=True)
 
-    sub.add_parser('new', help='Create a new task config and task.md')
+    sub.add_parser('new', help='Create a new task config')
 
     run = sub.add_parser('run', help='Run one task in current process (infinite)')
     run.add_argument('--task', required=True)
