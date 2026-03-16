@@ -3,16 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .decision import run_decision
 from .market import MarketConfig, MarketPipeline
 from .rag import EventRAG
 from .tasking import load_task_config
-from .trading import SimplePolymarketTrader, parse_trade_action_from_openclaw
 
 
 @dataclass(slots=True)
@@ -24,7 +23,6 @@ class TaskRuntimePaths:
     last_seen_json: Path
     vector_dir: Path
     decision_records_jsonl: Path
-    trade_log_jsonl: Path
     task_md: Path
     decision_md: Path
 
@@ -32,9 +30,9 @@ class TaskRuntimePaths:
 class PolyMonitorRuntime:
     def __init__(self, task_name: str) -> None:
         task_dir = Path('tasks') / task_name
-        cfg = load_task_config(task_dir)
         self.task_name = task_name
-        self.cfg = cfg
+        self.cfg = load_task_config(task_dir)
+
         self.paths = TaskRuntimePaths(
             task_dir=task_dir,
             events_jsonl=task_dir / 'data' / 'events.jsonl',
@@ -43,12 +41,10 @@ class PolyMonitorRuntime:
             last_seen_json=task_dir / 'data' / 'last_seen.json',
             vector_dir=task_dir / 'vector',
             decision_records_jsonl=task_dir / 'test' / 'decision_records.jsonl',
-            trade_log_jsonl=task_dir / 'logs' / 'trades.jsonl',
             task_md=task_dir / 'task.md',
             decision_md=task_dir / 'decision.md',
         )
         self.rag = EventRAG('sentence-transformers/all-MiniLM-L6-v2')
-        self.trader: SimplePolymarketTrader | None = None
 
     def _append_jsonl(self, path: Path, row: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,14 +63,16 @@ class PolyMonitorRuntime:
         self.paths.last_seen_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
 
     async def refresh_market_and_vectors(self) -> None:
-        market_cfg = MarketConfig(
-            tag_slug=str(self.cfg.get('TOPIC_TAG_SLUG', 'iran')),
-            volume_min=int(self.cfg.get('VOLUME_MIN', 1_000_000)),
-            events_jsonl=self.paths.events_jsonl,
-            filtered_events_jsonl=self.paths.filtered_events_jsonl,
-        )
-        pipeline = MarketPipeline(market_cfg)
+        self.cfg = load_task_config(self.paths.task_dir)
 
+        pipeline = MarketPipeline(
+            MarketConfig(
+                tag_slug=str(self.cfg.get('TOPIC_TAG_SLUG', 'iran')),
+                volume_min=int(self.cfg.get('VOLUME_MIN', 1_000_000)),
+                events_jsonl=self.paths.events_jsonl,
+                filtered_events_jsonl=self.paths.filtered_events_jsonl,
+            )
+        )
         events_count = await asyncio.to_thread(pipeline.scrape_events)
         filtered_count = await asyncio.to_thread(pipeline.filter_active_events)
         if filtered_count == 0:
@@ -83,52 +81,14 @@ class PolyMonitorRuntime:
         indexed = await asyncio.to_thread(self.rag.build, self.paths.filtered_events_jsonl, self.paths.vector_dir)
         logging.info('market refresh done events=%s filtered=%s indexed=%s', events_count, filtered_count, indexed)
 
-    def _openclaw_call(self, prompt: str) -> str:
-        cmd = self.cfg.get('OPENCLAW_COMMAND', ['openclaw', 'agent', '--message'])
-        if not isinstance(cmd, list) or not cmd:
-            raise RuntimeError('OPENCLAW_COMMAND must be list')
-        proc = subprocess.run(cmd + [prompt], capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            raise RuntimeError(f'openclaw failed: {proc.stderr.strip()}')
-        return proc.stdout.strip()
-
-    def _render_decision_prompt(self, tweet: dict[str, Any], event: dict[str, Any], score: float) -> str:
-        template = self.paths.decision_md.read_text(encoding='utf-8') if self.paths.decision_md.exists() else ''
-        payload = {
-            'task_name': self.cfg.get('TASK_NAME'),
-            'max_asset_usd': self.cfg.get('MAX_ASSET_USD', 10),
-            'trusted_media': self.cfg.get('TRUSTED_MEDIA', []),
-            'rag_score_threshold': self.cfg.get('RAG_SCORE_THRESHOLD', 0.70),
-            'match_score': score,
-            'tweet': tweet,
-            'event': {
-                'event_id': event.get('event_id'),
-                'slug': event.get('slug'),
-                'title': event.get('title'),
-                'description': event.get('description'),
-                'child_options': event.get('child_options', []),
-            },
-        }
-        return f"{template}\n\n# CONTEXT\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
-
-    def _ensure_trader(self) -> SimplePolymarketTrader:
-        if self.trader is not None:
-            return self.trader
-        import os
-
-        private_key = os.getenv('POLYMARKET_PRIVATE_KEY')
-        if not private_key:
-            raise RuntimeError('POLYMARKET_PRIVATE_KEY missing')
-        self.trader = SimplePolymarketTrader(private_key)
-        self.trader.initialize()
-        return self.trader
-
     async def process_news(self, tweet: dict[str, Any]) -> None:
+        self.cfg = load_task_config(self.paths.task_dir)
+
         threshold = float(self.cfg.get('RAG_SCORE_THRESHOLD', 0.70))
         matches = await asyncio.to_thread(self.rag.search, self.paths.vector_dir, tweet.get('text', ''), 5)
         matched = [m for m in matches if m.score >= threshold]
 
-        log_row: dict[str, Any] = {
+        row: dict[str, Any] = {
             'time': datetime.now(timezone.utc).isoformat(),
             'tweet': tweet,
             'threshold': threshold,
@@ -137,47 +97,31 @@ class PolyMonitorRuntime:
         }
 
         if not matched:
-            self._append_jsonl(self.paths.decision_records_jsonl, log_row)
+            self._append_jsonl(self.paths.decision_records_jsonl, row)
+            return
+
+        if not self.cfg.get('DECISION_ENABLED', True):
+            row['decision'] = 'disabled'
+            self._append_jsonl(self.paths.decision_records_jsonl, row)
             return
 
         best = matched[0]
-        prompt = self._render_decision_prompt(tweet, best.event, best.score)
-        log_row['prompt'] = prompt
+        template_text = self.paths.decision_md.read_text(encoding='utf-8') if self.paths.decision_md.exists() else None
 
-        if not self.cfg.get('DECISION_ENABLED', True):
-            log_row['decision'] = 'disabled'
-            self._append_jsonl(self.paths.decision_records_jsonl, log_row)
-            return
+        result = await asyncio.to_thread(
+            run_decision,
+            tweet,
+            best.event,
+            float(self.cfg.get('MIN_TRADE_USDC', 5)),
+            float(self.cfg.get('MAX_TRADE_USDC', self.cfg.get('MAX_ASSET_USD', 10))),
+            template_text,
+            self.cfg.get('OPENCLAW_COMMAND', ['openclaw', 'agent', '--message']),
+        )
 
-        response = await asyncio.to_thread(self._openclaw_call, prompt)
-        log_row['openclaw_response'] = response
-
-        action = parse_trade_action_from_openclaw(response, float(self.cfg.get('MAX_ASSET_USD', 10)))
-        if action is None:
-            log_row['trade'] = 'skip_invalid_json'
-            self._append_jsonl(self.paths.decision_records_jsonl, log_row)
-            return
-
-        if not self.cfg.get('TRADING_ENABLED', True):
-            log_row['trade'] = 'disabled'
-            self._append_jsonl(self.paths.decision_records_jsonl, log_row)
-            return
-
-        trader = self._ensure_trader()
-        if action.side == 'buy':
-            result = await asyncio.to_thread(trader.market_buy, action.token_id, action.amount_usd)
-        else:
-            result = await asyncio.to_thread(trader.market_sell, action.token_id, action.amount_usd)
-
-        log_row['trade'] = {'action': action.__dict__, 'result': result}
-        self._append_jsonl(self.paths.trade_log_jsonl, {
-            'time': datetime.now(timezone.utc).isoformat(),
-            'task_name': self.task_name,
-            'tweet': tweet,
-            'action': action.__dict__,
-            'result': result,
-        })
-        self._append_jsonl(self.paths.decision_records_jsonl, log_row)
+        row['prompt'] = result.prompt
+        row['openclaw_response'] = result.response
+        row['trading_enabled'] = self.cfg.get('TRADING_ENABLED', True)
+        self._append_jsonl(self.paths.decision_records_jsonl, row)
 
     def _build_twitter_client(self):
         from twikit import Client
@@ -192,6 +136,7 @@ class PolyMonitorRuntime:
         return c
 
     async def twitter_loop(self) -> None:
+        self.cfg = load_task_config(self.paths.task_dir)
         c = self._build_twitter_client()
         watch_users = {str(x).strip() for x in self.cfg.get('WATCH_USERS', []) if str(x).strip()}
         if not watch_users:
@@ -201,6 +146,9 @@ class PolyMonitorRuntime:
         poll_interval = int(self.cfg.get('TWITTER_POLL_INTERVAL_SECONDS', 60))
 
         while True:
+            self.cfg = load_task_config(self.paths.task_dir)
+            watch_users = {str(x).strip() for x in self.cfg.get('WATCH_USERS', []) if str(x).strip()}
+            poll_interval = int(self.cfg.get('TWITTER_POLL_INTERVAL_SECONDS', 60))
             try:
                 timeline = await c.get_latest_timeline()
                 for tw in timeline:
@@ -239,12 +187,13 @@ class PolyMonitorRuntime:
         logging.info('task.md loaded for %s: %s', self.task_name, task_text)
 
         await self.refresh_market_and_vectors()
-
         refresh_interval = int(self.cfg.get('MARKET_REFRESH_INTERVAL_SECONDS', 86400))
 
         async def refresh_loop() -> None:
             while True:
-                await asyncio.sleep(refresh_interval)
+                self.cfg = load_task_config(self.paths.task_dir)
+                refresh_interval_local = int(self.cfg.get('MARKET_REFRESH_INTERVAL_SECONDS', 86400))
+                await asyncio.sleep(refresh_interval_local)
                 try:
                     await self.refresh_market_and_vectors()
                 except Exception:

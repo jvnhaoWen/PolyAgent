@@ -1,19 +1,15 @@
 # TASKS
 
 ## 已完成
-
-- [x] 改造成 prompt 驱动任务系统。
-- [x] `new` 时先读取 task.md 并提问收集配置。
-- [x] 所有运行参数统一从 task_config.py 读取。
-- [x] 市场抓取 + 活跃事件过滤（acceptingOrders + volume 过滤）。
-- [x] event 粒度 RAG（MiniLM + FAISS）。
-- [x] 推特监控后实时匹配并按阈值触发。
-- [x] decision.md 模板注入并调用 OpenClaw 做最终决策。
-- [x] 接入真实 CLOB buy/sell 执行。
-- [x] 测试期记录每次触发上下文到 test/。
+- [x] 将决策逻辑迁移到 `decision.py`
+- [x] 将 OpenClaw 交互统一为 `openclaw agent --message <decision prompt>`
+- [x] 让 `task_config.py` 成为唯一配置源
+- [x] `new` 阶段对 task_config 每一项进行交互初始化（支持回车默认）
+- [x] 默认 WATCH_USERS 调整为 `Reuters,cnnbrk,EnglishFars,IranIntl_En,BBCBreaking`
+- [x] 增加 MIN/MAX 交易金额配置注入决策 prompt
+- [x] runtime 去除对 trading 模块耦合
+- [x] 新增 `USER_GUIDE.md`
 
 ## 待完成
-
-- [ ] 对 Twitter 会话失效增加自动恢复与告警。
-- [ ] 支持多新闻源融合（RSS/新华社等）。
-- [ ] 扩展 split/merge/redeem 真实链上执行。
+- [ ] 增加 twitter cookie 过期自动提示与刷新流程
+- [ ] 增加多源新闻并行输入

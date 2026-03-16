@@ -1,47 +1,38 @@
 # ARCHITECTURE
 
-## Prompt 驱动主流程
-
-- `poly-monitor new`：
-  - 展示 `task.md` 的角色与任务说明。
-  - 询问用户 `TOPIC_TAG_SLUG`、`WATCH_USERS`、`MAX_ASSET_USD` 等关键信息。
-  - 写入 `task_config.py`（其余参数保留默认）。
-- `poly-monitor run/start`：
-  - 读取 `task_config.py` 作为唯一配置源。
-  - 自动执行数据抓取、过滤、向量构建、推特监控、决策、交易。
+## 目标
+将系统变为 prompt-first：
+- task 负责参数与上下文
+- decision.py 负责构建最终 prompt 并调用 OpenClaw
+- trading 逻辑由 OpenClaw skill 自己执行（本项目解耦）
 
 ## 模块
 
-### 1) tasking.py
-- 创建任务目录与 `task.md` / `decision.md` / `task_config.py`
-- 维护后台任务注册表与 start/list/stop
+### tasking.py
+- `new`：展示 task.md，逐项询问配置，写入 task_config.py
+- `start/list/stop`：任务进程管理
 
-### 2) market.py
-- 用 `TOPIC_TAG_SLUG` + `VOLUME_MIN` 调用 Gamma API
-- 分页抓取与重试
+### market.py
+- 基于 `TOPIC_TAG_SLUG` + `VOLUME_MIN` 抓 Gamma API
 - 过滤 `acceptingOrders=true` 且 `volume>0`
-- 产物：`filtered_acceptingOrders.jsonl`（event + child_options）
+- 输出 `filtered_acceptingOrders.jsonl`
 
-### 3) rag.py
-- 模型：`sentence-transformers/all-MiniLM-L6-v2`
+### rag.py
+- 模型：`all-MiniLM-L6-v2`
 - 索引：FAISS
-- 在 event 粒度进行检索，返回匹配分数
+- 对推文做 event 粒度召回
 
-### 4) runtime.py
-- 读取 task 配置并长期运行：
-  - 定时刷新市场与向量库
-  - 实时轮询 twikit
-- 每条新推文触发 RAG
-- 分数 >= `RAG_SCORE_THRESHOLD` 时：
-  - 将 tweet + event + child_options 注入 `decision.md` 模板
-  - 调用 OpenClaw，解析 JSON 决策
-  - 若 `TRADING_ENABLED`，执行真实交易
+### decision.py
+- 构建动态 prompt（市场详情 + 新闻 + 风控）
+- 核心调用：`openclaw agent --message "<decision prompt>"`
 
-### 5) trading.py
-- `py-clob-client` 封装
-- 支持 market buy/sell
-- 对金额做 `MAX_ASSET_USD` 上限约束
+### runtime.py
+- 读取 task_config.py（唯一配置源）
+- 周期刷新市场与向量
+- 推特实时轮询
+- 触发阈值后调用 decision.py
+- 每次触发写入 `test/decision_records.jsonl`
 
-## 观测与调试
-- 每次触发写入：`test/decision_records.jsonl`
-- 成功下单写入：`logs/trades.jsonl`
+## 配置更新
+- 任务 stop 后再 start/run 会重新读取 task_config.py
+- runtime 运行中也会在轮询中重新加载 config，确保 prompt 使用最新配置

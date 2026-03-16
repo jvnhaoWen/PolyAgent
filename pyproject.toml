@@ -4,15 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polyagent"
-version = "1.0.0"
-description = "OpenClaw Polymarket Twitter monitoring and auto-trading skill"
+version = "1.1.0"
+description = "Prompt-driven OpenClaw Polymarket Twitter monitor"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
   "twikit>=2.3.0",
   "sentence-transformers>=2.7.0",
   "faiss-cpu>=1.8.0",
-  "py-clob-client>=0.19.0",
 ]
 
 [project.scripts]

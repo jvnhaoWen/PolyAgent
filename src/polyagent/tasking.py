@@ -16,43 +16,44 @@ TASKS_ROOT = Path('tasks')
 
 TASK_MD = """你是一个polymarket交易agent，你有在polymarket进行下单购买的能力，能根据提供的市场和新闻信息以及你自己的判断做出是否购买某一个事件特定头寸的决定。你现在需要询问用户task_config.py当中的信息来完成配置。"""
 
-DECISION_MD = """你是 Polymarket 交易决策 Agent。
+DECISION_MD = """你是一个专业、谨慎但果断的 Polymarket 交易 Agent。你已经具备并可以直接调用 Polymarket 下单 skill。
 
-输入包含：
-1) 新闻内容（tweet）
-2) 匹配到的事件（event_title / event_description）
-3) 可选子市场（child_options，含 yes/no token）
-4) 风控参数（MAX_ASSET_USD）
+系统传入的新闻已经过可信来源筛选与相关新闻匹配，你可以信任其真实性与相关性。你的任务是根据这些新闻，在给定候选市场中判断是否存在足以下单的目标。
 
-你必须仅返回 JSON，不要返回其它文本：
-{
-  "should_trade": true/false,
-  "side": "buy" | "sell",
-  "token_id": "string",
-  "amount_usd": number,
-  "reason": "string"
-}
+候选市场如下：
+{polymarket市场详情}
 
-约束：
-- 若不确定，should_trade=false。
-- amount_usd 不得超过 MAX_ASSET_USD。
+相关新闻如下：
+{新闻信息}
+
+规则：
+1. 保持谨慎，只在新闻与某个候选市场直接相关，且足以证明该市场对应事件已经发生或已经不可能发生、已被权威确认，或已进入可以被市场迅速定价的明确事实状态时才下单。
+2. 不因评论、猜测、间接分析、情绪表达或未证实信息下单。
+3. 一旦信息足以证明事件可以结算，应立即果断调用下单 skill 执行交易，不要只给建议，不要输出交易计划。
+4. 必须根据 market question 和description本身的语义判断买入 YES 还是 NO；clobTokenIds 顺序固定为 yes 在前、no 在后。
+5. 只选择一个最匹配的市场下单。
+6. 下单金额不少于 {min_trade_usdc} USDC，不高于 {max_trade_usdc} USDC。
+
+如果信息不足以支持明确交易，就放弃本次下单；如果信息已经足够明确，就立即执行交易。
 """
 
 TASK_CONFIG_TEMPLATE = """TASK_NAME = {task_name!r}
 MAX_ASSET_USD = {max_asset_usd}
+MIN_TRADE_USDC = {min_trade_usdc}
+MAX_TRADE_USDC = {max_trade_usdc}
 TASK_INIT_TIME = {init_time!r}
-MARKET_REFRESH_INTERVAL_SECONDS = 86400
-TWITTER_POLL_INTERVAL_SECONDS = 60
+MARKET_REFRESH_INTERVAL_SECONDS = {market_refresh_interval}
+TWITTER_POLL_INTERVAL_SECONDS = {twitter_poll_interval}
 WATCH_USERS = {watch_users!r}
 TOPIC_TAG_SLUG = {tag_slug!r}
-VOLUME_MIN = 1000000
+VOLUME_MIN = {volume_min}
 RAG_SCORE_THRESHOLD = {rag_score_threshold}
-DECISION_ENABLED = True
-TRADING_ENABLED = True
-OPENCLAW_COMMAND = ['openclaw', 'agent', '--message']
-TRUSTED_MEDIA = ['Reuters', 'AP', 'BBCWorld', 'Bloomberg']
-TWITTER_AUTH_TOKEN = ''
-TWITTER_CT0 = ''
+DECISION_ENABLED = {decision_enabled}
+TRADING_ENABLED = {trading_enabled}
+OPENCLAW_COMMAND = {openclaw_command!r}
+TRUSTED_MEDIA = {trusted_media!r}
+TWITTER_AUTH_TOKEN = {twitter_auth_token!r}
+TWITTER_CT0 = {twitter_ct0!r}
 """
 
 
@@ -84,17 +85,43 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
+def _input_default(prompt: str, default: str) -> str:
+    value = input(f'{prompt} [{default}]: ').strip()
+    return value if value else default
+
+
+def _input_bool(prompt: str, default: bool) -> bool:
+    raw = _input_default(prompt, 'true' if default else 'false').lower()
+    return raw in {'true', '1', 'yes', 'y'}
+
+
 def create_task_interactive() -> Path:
     print('\n--- task.md ---')
     print(TASK_MD)
     print('---------------\n')
 
-    task_name = input('TASK_NAME: ').strip() or 'iran_fast_reaction'
-    tag_slug = input('TOPIC_TAG_SLUG (e.g. iran): ').strip() or 'iran'
-    watch_users_raw = input('WATCH_USERS (comma-separated, e.g. Reuters,AP,BBCWorld): ').strip() or 'Reuters,AP,BBCWorld'
+    task_name = _input_default('TASK_NAME', 'iran_fast_reaction')
+    tag_slug = _input_default('TOPIC_TAG_SLUG', 'iran')
+
+    watch_default = 'Reuters,cnnbrk,EnglishFars,IranIntl_En,BBCBreaking'
+    watch_users_raw = _input_default('WATCH_USERS (comma-separated)', watch_default)
     watch_users = [x.strip() for x in watch_users_raw.split(',') if x.strip()]
-    max_asset_usd = float(input('MAX_ASSET_USD [10]: ').strip() or '10')
-    rag_score_threshold = float(input('RAG_SCORE_THRESHOLD [0.70]: ').strip() or '0.70')
+
+    max_asset_usd = float(_input_default('MAX_ASSET_USD', '10'))
+    min_trade_usdc = float(_input_default('MIN_TRADE_USDC', '5'))
+    max_trade_usdc = float(_input_default('MAX_TRADE_USDC', str(max_asset_usd)))
+
+    market_refresh_interval = int(_input_default('MARKET_REFRESH_INTERVAL_SECONDS', '86400'))
+    twitter_poll_interval = int(_input_default('TWITTER_POLL_INTERVAL_SECONDS', '60'))
+    volume_min = int(_input_default('VOLUME_MIN', '1000000'))
+    rag_score_threshold = float(_input_default('RAG_SCORE_THRESHOLD', '0.70'))
+    decision_enabled = _input_bool('DECISION_ENABLED', True)
+    trading_enabled = _input_bool('TRADING_ENABLED', True)
+
+    openclaw_command = ['openclaw', 'agent', '--message']
+    trusted_media = ['Reuters', 'AP', 'BBCWorld', 'Bloomberg']
+    twitter_auth_token = _input_default('TWITTER_AUTH_TOKEN', '')
+    twitter_ct0 = _input_default('TWITTER_CT0', '')
 
     task_dir = TASKS_ROOT / task_name
     (task_dir / 'data').mkdir(parents=True, exist_ok=True)
@@ -104,21 +131,30 @@ def create_task_interactive() -> Path:
 
     (task_dir / 'task.md').write_text(TASK_MD, encoding='utf-8')
     (task_dir / 'decision.md').write_text(DECISION_MD, encoding='utf-8')
-
     (task_dir / 'task_config.py').write_text(
         TASK_CONFIG_TEMPLATE.format(
             task_name=task_name,
             max_asset_usd=max_asset_usd,
+            min_trade_usdc=min_trade_usdc,
+            max_trade_usdc=max_trade_usdc,
             init_time=datetime.now(timezone.utc).isoformat(),
+            market_refresh_interval=market_refresh_interval,
+            twitter_poll_interval=twitter_poll_interval,
             watch_users=watch_users,
             tag_slug=tag_slug,
+            volume_min=volume_min,
             rag_score_threshold=rag_score_threshold,
+            decision_enabled=decision_enabled,
+            trading_enabled=trading_enabled,
+            openclaw_command=openclaw_command,
+            trusted_media=trusted_media,
+            twitter_auth_token=twitter_auth_token,
+            twitter_ct0=twitter_ct0,
         ),
         encoding='utf-8',
     )
 
     print(f'[OK] Created task: {task_dir}')
-    print('请编辑 task_config.py 中 TWITTER_AUTH_TOKEN / TWITTER_CT0 后再运行。')
     return task_dir
 
 
