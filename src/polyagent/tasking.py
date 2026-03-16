@@ -148,8 +148,11 @@ def start_task_process(task_name: str) -> int:
     if not task_dir.exists():
         raise FileNotFoundError(f'task not found: {task_name}')
 
-    cmd = [sys.executable, '-m', 'polyagent.cli', 'run', '--task', task_name]
-    proc = subprocess.Popen(cmd, start_new_session=True)
+    log_path = task_dir / 'logs' / 'task_runtime.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, '-m', 'polyagent.cli', 'run', '--task', task_name, '--mode', 'live']
+    log_file = log_path.open('a', encoding='utf-8')
+    proc = subprocess.Popen(cmd, start_new_session=True, stdout=log_file, stderr=subprocess.STDOUT)
     reg = _load_registry()
     reg[task_name] = asdict(TaskMeta(task_name=task_name, pid=proc.pid, started_at=datetime.now(timezone.utc).isoformat()))
     _save_registry(reg)
