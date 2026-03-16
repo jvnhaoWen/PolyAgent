@@ -168,9 +168,9 @@ def list_tasks() -> list[dict[str, Any]]:
     for task_name, meta in reg.items():
         pid = int(meta['pid'])
         alive = _is_alive(pid)
-        row = {**meta, 'alive': alive}
-        rows.append(row)
         if alive:
+            row = {**meta, 'alive': alive}
+            rows.append(row)
             cleaned[task_name] = meta
     _save_registry(cleaned)
     return rows
