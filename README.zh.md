@@ -1,6 +1,6 @@
 <div align="center">
 
-# Poly Monitor
+# Poly Monitor（中文）
 
 <pre>
 ██████╗  ██████╗ ██╗  ██╗   ██╗    ███╗   ███╗ ██████╗ ███╗   ██╗██╗████████╗ ██████╗ ██████╗
@@ -21,56 +21,56 @@
 
 </div>
 
-## Quick Start (recommend in tmux)
+## 快速开始（建议在 tmux 里运行）
 
-For long-running monitoring, use a **global command in your shell session** and run inside `tmux`.
+为了长时间稳定运行，建议把命令安装到当前环境后，在 `tmux` 会话里执行。
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 poly-monitor new
-poly-monitor run --task <task_name>   # test mode: print all outputs
-poly-monitor start --task <task_name> # production mode: logs to task log
+poly-monitor run --task <task_name>   # 测试模式：前台打印完整输出
+poly-monitor start --task <task_name> # 实战模式：后台运行并写入日志
 ```
 
-> Recommended: run `poly-monitor start --task xxx` and other operations in tmux so the session can stay alive.
+> 建议把 `poly-monitor run/start` 及相关操作都放在 tmux 里，避免会话中断。
 
-## Unified Architecture + User Guide
+## 架构与用户指南（合并版）
 
-### Runtime flow
-1. `poly-monitor new` creates task config (`tasks/<task>/task_config.py`).
-2. Market pipeline fetches from Gamma API and filters active markets.
-3. RAG builds MiniLM + FAISS index.
-4. Twitter watcher polls watched users.
-5. If score reaches threshold, decision prompt is synthesized and sent to OpenClaw.
-6. Trade response and matched news are persisted into task logs.
+### 运行主流程
+1. `poly-monitor new` 交互创建任务配置（`tasks/<task>/task_config.py`）。
+2. 市场管线从 Gamma API 拉取并筛选活跃市场。
+3. RAG 使用 MiniLM + FAISS 构建向量索引。
+4. Twitter 轮询关注账号。
+5. 达到阈值后，合成决策 prompt 并调用 OpenClaw。
+6. 交易返回与匹配新闻写入任务日志。
 
-### CLI modes
-- `run`: testing mode, keeps printing outputs in foreground.
-- `start`: production mode, runs in background and writes runtime output into `tasks/<task>/logs/task_runtime.log`.
+### CLI 模式
+- `run`：测试模式，前台打印所有输出。
+- `start`：实战模式，后台运行并写入 `tasks/<task>/logs/task_runtime.log`。
 
-### Core command
+### 核心调用
 ```bash
 openclaw agent --message "<decision prompt>"
 ```
 
-### Key logs
-- `tasks/<task>/logs/runtime_events.jsonl`: news, threshold-trigger records, synthesized prompts, and trade responses.
-- `tasks/<task>/logs/task_runtime.log`: production terminal-style runtime stream.
-- `tasks/<task>/test/decision_records.jsonl`: detailed trigger debug records.
+### 关键日志
+- `tasks/<task>/logs/runtime_events.jsonl`：新闻、阈值触发记录、合成 prompt、交易返回。
+- `tasks/<task>/logs/task_runtime.log`：实战模式下的运行监控输出。
+- `tasks/<task>/test/decision_records.jsonl`：详细调试记录。
 
-### Common task operations
+### 常用命令
 ```bash
 poly-monitor list
 poly-monitor stop --task <task_name>
 ```
 
 ## TODO
-- [ ] Interactive UI version will be added.
-- [ ] Extend to custom information sources beyond Twitter.
-- [ ] Support `sell`, `split`, `merge`, `redeem`.
-- [ ] Support strategies and limit orders.
+- [ ] 后续会更新交互界面版。
+- [ ] 会扩展推特之外的自定义信息源。
+- [ ] 支持 `sell`、`split`、`merge`、`redeem`。
+- [ ] 支持策略、限价单等。
 
 ## License
 MIT
