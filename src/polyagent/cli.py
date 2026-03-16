@@ -3,8 +3,49 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 
 from .tasking import create_task_interactive, list_tasks, start_task_process, stop_task
+
+
+LOGO = r"""
+  ██████╗   ██████╗  ██╗      ██╗   ██╗    ███╗   ███╗  ██████╗  ███╗   ██╗ ██╗ ████████╗  ██████╗  ██████╗
+  ██╔══██╗ ██╔═══██╗ ██║      ╚██╗ ██╔╝    ████╗ ████║ ██╔═══██╗ ████╗  ██║ ██║ ╚══██╔══╝ ██╔═══██╗ ██╔══██╗
+  ██████╔╝ ██║   ██║ ██║       ╚████╔╝     ██╔████╔██║ ██║   ██║ ██╔██╗ ██║ ██║    ██║    ██║   ██║ ██████╔╝
+  ██╔═══╝  ██║   ██║ ██║        ╚██╔╝      ██║╚██╔╝██║ ██║   ██║ ██║╚██╗██║ ██║    ██║    ██║   ██║ ██╔══██╗
+  ██║      ╚██████╔╝ ███████╗    ██║       ██║ ╚═╝ ██║ ╚██████╔╝ ██║ ╚████║ ██║    ██║    ╚██████╔╝ ██║  ██║
+  ╚═╝       ╚═════╝  ╚══════╝    ╚═╝       ╚═╝     ╚═╝  ╚═════╝  ╚═╝  ╚═══╝ ╚═╝    ╚═╝     ╚═════╝  ╚═╝  ╚═╝
+"""
+
+
+def print_logo() -> None:
+    """
+    Print colorful ASCII logo without external packages.
+    """
+    # 如果终端不支持颜色就普通打印
+    if not sys.stdout.isatty():
+        print(LOGO)
+        print("[POLY MONITOR] runtime starting...\n")
+        return
+
+    reset = "\033[0m"
+
+    colors = [
+        "\033[38;5;45m",
+        "\033[38;5;51m",
+        "\033[38;5;87m",
+        "\033[38;5;123m",
+        "\033[38;5;159m",
+        "\033[38;5;195m",
+    ]
+
+    lines = LOGO.strip("\n").splitlines()
+
+    for i, line in enumerate(lines):
+        color = colors[i % len(colors)]
+        print(f"{color}{line}{reset}")
+
+    print(f"\033[38;5;48m[POLY MONITOR]\033[0m task runtime started\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,13 +64,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     stop = sub.add_parser('stop', help='Stop background task by task name')
     stop.add_argument('--task', required=True)
+
     return p
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s'
+    )
 
     if args.command == 'new':
         create_task_interactive()
@@ -45,6 +91,7 @@ def main() -> None:
         if not rows:
             print('No running tasks')
             return
+
         for r in rows:
             print(f"task={r['task_name']} pid={r['pid']} alive={r['alive']} started_at={r['started_at']}")
         return
@@ -55,7 +102,10 @@ def main() -> None:
         return
 
     if args.command == 'run':
+        print_logo()
+
         from .runtime import PolyMonitorRuntime
+
         runtime = PolyMonitorRuntime(args.task)
         asyncio.run(runtime.run_forever())
         return
