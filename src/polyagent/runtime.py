@@ -27,9 +27,10 @@ class TaskRuntimePaths:
 
 
 class PolyMonitorRuntime:
-    def __init__(self, task_name: str) -> None:
+    def __init__(self, task_name: str, mode: str = 'test') -> None:
         task_dir = Path('tasks') / task_name
         self.task_name = task_name
+        self.mode = mode
         self.cfg = load_task_config(task_dir)
 
         self.paths = TaskRuntimePaths(
@@ -129,9 +130,22 @@ class PolyMonitorRuntime:
             'event_id': best.event.get('event_id'),
             'event_title': best.event.get('title'),
             'score': best.score,
+            'matched_market': best.event.get('matched_market', {}),
             'openclaw_response': result.response,
         }
         logging.info('DECISION: %s', json.dumps(decision_summary, ensure_ascii=False))
+
+        trigger_record = {
+            'time': datetime.now(timezone.utc).isoformat(),
+            'type': 'trigger_record',
+            'tweet': tweet,
+            'matched_event': best.event,
+            'score': best.score,
+            'prompt': result.prompt,
+            'trade_response': result.response,
+        }
+        self._append_jsonl(self.paths.runtime_log_jsonl, trigger_record)
+
         self._append_jsonl(
             self.paths.runtime_log_jsonl,
             {
@@ -166,7 +180,6 @@ class PolyMonitorRuntime:
             raise RuntimeError('WATCH_USERS is empty in task_config.py')
 
         last_seen = self._load_last_seen()
-        poll_interval = int(self.cfg.get('TWITTER_POLL_INTERVAL_SECONDS', 60))
 
         while True:
             self.cfg = load_task_config(self.paths.task_dir)
