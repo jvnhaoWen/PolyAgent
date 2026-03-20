@@ -31,6 +31,7 @@ OPENCLAW_COMMAND = {openclaw_command!r}
 TRUSTED_MEDIA = {trusted_media!r}
 TWITTER_AUTH_TOKEN = {twitter_auth_token!r}
 TWITTER_CT0 = {twitter_ct0!r}
+POLYMARKET_PRIVATE_KEY = {polymarket_private_key!r}
 """
 
 
@@ -95,6 +96,7 @@ def create_task_interactive() -> Path:
     trusted_media = ['Reuters', 'AP', 'BBCWorld', 'Bloomberg']
     twitter_auth_token = _input_default('TWITTER_AUTH_TOKEN', '')
     twitter_ct0 = _input_default('TWITTER_CT0', '')
+    polymarket_private_key = _input_default('POLYMARKET_PRIVATE_KEY', os.environ.get('POLYMARKET_PRIVATE_KEY', '').strip())
 
     task_dir = TASKS_ROOT / task_name
     (task_dir / 'data').mkdir(parents=True, exist_ok=True)
@@ -121,6 +123,7 @@ def create_task_interactive() -> Path:
             trusted_media=trusted_media,
             twitter_auth_token=twitter_auth_token,
             twitter_ct0=twitter_ct0,
+            polymarket_private_key=polymarket_private_key,
         ),
         encoding='utf-8',
     )
