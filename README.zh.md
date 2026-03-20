@@ -59,12 +59,7 @@ poly-monitor start --task <task_name> # 实战模式：后台 worker + 仪表板
 - 中部资产模块：EOA / Proxy Wallet、Portfolio Value Summary、Recent Activity、Open Positions。
 - 底部新闻模块：直接滚动展示 `tasks/<task>/data/tweets.jsonl` 中的最新新闻。
 
-私钥读取顺序：
-1. `POLY_PRIVATE_KEY`
-2. `POLYMARKET_PRIVATE_KEY`
-3. `PRIVATE_KEY`
-4. `tasks/<task>/private_key.txt`
-5. `.private_key`
+私钥读取 `POLYMARKET_PRIVATE_KEY`
 
 ### 核心调用
 ```bash

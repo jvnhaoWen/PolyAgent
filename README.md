@@ -59,12 +59,7 @@ The `start` dashboard shows exactly three terminal blocks:
 - portfolio block: EOA / proxy wallet, portfolio value summary, recent activity, open positions.
 - rolling news block: latest entries from `tasks/<task>/data/tweets.jsonl`.
 
-Private key lookup order for the dashboard:
-1. `POLY_PRIVATE_KEY`
-2. `POLYMARKET_PRIVATE_KEY`
-3. `PRIVATE_KEY`
-4. `tasks/<task>/private_key.txt`
-5. `.private_key`
+Private key lookup order for the dashboard: `POLYMARKET_PRIVATE_KEY`
 
 ### Core command
 ```bash

@@ -32,6 +32,7 @@ class PolyMonitorRuntime:
         self.task_name = task_name
         self.mode = mode
         self.cfg = load_task_config(task_dir)
+        self.started_at = datetime.now(timezone.utc).isoformat()
 
         self.paths = TaskRuntimePaths(
             task_dir=task_dir,
@@ -44,6 +45,13 @@ class PolyMonitorRuntime:
             runtime_log_jsonl=task_dir / 'logs' / 'runtime_events.jsonl',
         )
         self.rag = EventRAG('sentence-transformers/all-MiniLM-L6-v2')
+        self.stats: dict[str, Any] = {
+            'markets': 0,
+            'tweets': 0,
+            'trades': 0,
+            'last_news': None,
+            'trade_history': [],
+        }
 
     def _append_jsonl(self, path: Path, row: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +69,54 @@ class PolyMonitorRuntime:
     def _save_last_seen(self, data: dict[str, str]) -> None:
         self.paths.last_seen_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
 
+    def _render_logo(self) -> str:
+        logo = [
+            '██████╗  ██████╗ ██╗  ██╗   ██╗',
+            '██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝',
+            '██████╔╝██║   ██║██║   ╚████╔╝ ',
+            '██╔═══╝ ██║   ██║██║    ╚██╔╝  ',
+            '██║     ╚██████╔╝███████╗██║   ',
+            '╚═╝      ╚═════╝ ╚══════╝╚═╝   ',
+            '███╗   ███╗ ██████╗ ███╗   ██╗██╗████████╗ ██████╗ ██████╗',
+            '████╗ ████║██╔═══██╗████╗  ██║██║╚══██╔══╝██╔═══██╗██╔══██╗',
+            '██╔████╔██║██║   ██║██╔██╗ ██║██║   ██║   ██║   ██║██████╔╝',
+            '██║╚██╔╝██║██║   ██║██║╚██╗██║██║   ██║   ██║   ██║██╔══██╗',
+            '██║ ╚═╝ ██║╚██████╔╝██║ ╚████║██║   ██║   ╚██████╔╝██║  ██║',
+            '╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝',
+        ]
+        if self.mode != 'live':
+            return '\n'.join(logo)
+        colors = ['\033[38;5;45m', '\033[38;5;81m', '\033[38;5;117m', '\033[38;5;159m']
+        reset = '\033[0m'
+        return '\n'.join(f"{colors[i % len(colors)]}{line}{reset}" for i, line in enumerate(logo))
+
+    def _print_live_dashboard(self) -> None:
+        if self.mode != 'live':
+            return
+
+        heartbeat_color = '\033[32m●\033[0m'
+        last_news = self.stats.get('last_news') or {}
+        trade_lines = self.stats.get('trade_history', [])[-5:]
+
+        print('')
+        print(self._render_logo())
+        print(f"POLY MONITOR v1.1.0 | started at {self.started_at} (UTC)")
+        print('█▄█▄█▄█▄█▄█▄█▄█▄█▄█')
+        print(f"Heartbeat {heartbeat_color}")
+        print(f"Markets: {self.stats['markets']}")
+        print(f"Tweets: {self.stats['tweets']}")
+        print(f"Trades: {self.stats['trades']}")
+        print('\n---')
+        print(
+            f"Latest: {last_news.get('text', 'N/A')} | time={last_news.get('time', 'N/A')} | source={last_news.get('source', 'N/A')}"
+        )
+        print('\n-----')
+        if trade_lines:
+            for line in trade_lines:
+                print(line)
+        else:
+            print('No trade records yet')
+
     async def refresh_market_and_vectors(self) -> None:
         self.cfg = load_task_config(self.paths.task_dir)
 
@@ -74,14 +130,22 @@ class PolyMonitorRuntime:
         )
         events_count = await asyncio.to_thread(pipeline.scrape_events)
         filtered_count = await asyncio.to_thread(pipeline.filter_active_events)
+        self.stats['markets'] = filtered_count
         if filtered_count == 0:
             logging.warning('There is no matched market for your key words currently.')
 
         indexed = await asyncio.to_thread(self.rag.build, self.paths.filtered_events_jsonl, self.paths.vector_dir)
         logging.info('market refresh done events=%s filtered=%s indexed=%s', events_count, filtered_count, indexed)
+        self._print_live_dashboard()
 
     async def process_news(self, tweet: dict[str, Any]) -> None:
         self.cfg = load_task_config(self.paths.task_dir)
+        self.stats['tweets'] += 1
+        self.stats['last_news'] = {
+            'text': tweet.get('text', ''),
+            'time': tweet.get('created_at') or datetime.now(timezone.utc).isoformat(),
+            'source': tweet.get('user', ''),
+        }
 
         logging.info('NEWS: user=%s tweet_id=%s text=%s', tweet.get('user'), tweet.get('tweet_id'), tweet.get('text'))
         self._append_jsonl(
@@ -107,11 +171,13 @@ class PolyMonitorRuntime:
 
         if not matched:
             self._append_jsonl(self.paths.decision_records_jsonl, row)
+            self._print_live_dashboard()
             return
 
         if not self.cfg.get('DECISION_ENABLED', True):
             row['decision'] = 'disabled'
             self._append_jsonl(self.paths.decision_records_jsonl, row)
+            self._print_live_dashboard()
             return
 
         best = matched[0]
@@ -159,6 +225,12 @@ class PolyMonitorRuntime:
         row['openclaw_response'] = result.response
         row['trading_enabled'] = self.cfg.get('TRADING_ENABLED', True)
         self._append_jsonl(self.paths.decision_records_jsonl, row)
+
+        self.stats['trades'] += 1
+        self.stats['trade_history'].append(
+            f"[{datetime.now(timezone.utc).isoformat()}] event={best.event.get('title', '')} score={best.score:.4f} response={result.response[:120]}"
+        )
+        self._print_live_dashboard()
 
     def _build_twitter_client(self):
         from twikit import Client
