@@ -30,13 +30,19 @@ SECTION_STYLES = {
     'news': {'border': '\033[38;5;221m', 'title': '\033[1;38;5;228m', 'text': '\033[38;5;255m'},
 }
 HEARTBEAT_PALETTE = [
-    '\033[1;38;5;45m● LIVE\033[0m',
-    '\033[1;38;5;51m● LIVE\033[0m',
-    '\033[1;38;5;87m● LIVE\033[0m',
-    '\033[1;38;5;123m● LIVE\033[0m',
-    '\033[1;38;5;159m● LIVE\033[0m',
-    '\033[1;38;5;195m● LIVE\033[0m',
+    '\033[1;38;5;45m●\033[0m',
+    '\033[1;38;5;51m●\033[0m',
+    '\033[1;38;5;87m●\033[0m',
+    '\033[1;38;5;123m●\033[0m',
+    '\033[1;38;5;159m●\033[0m',
+    '\033[1;38;5;195m●\033[0m',
 ]
+SECTION_WIDTH = 112
+SECTION_HEIGHTS = {
+    'header': 13,
+    'portfolio': 24,
+    'news': 18,
+}
 
 
 class PolyMonitorDashboard:
@@ -57,6 +63,10 @@ class PolyMonitorDashboard:
 
     def _clear(self) -> None:
         sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
+
+    def _move_to_top(self) -> None:
+        sys.stdout.write('\033[H')
         sys.stdout.flush()
 
     def _heartbeat(self) -> str:
@@ -154,7 +164,7 @@ class PolyMonitorDashboard:
         except Exception:
             return text
 
-    def _truncate(self, value: Any, width: int = 88) -> str:
+    def _truncate(self, value: Any, width: int) -> str:
         text = str(value).replace('\n', ' ').strip()
         if len(text) <= width:
             return text
@@ -173,16 +183,17 @@ class PolyMonitorDashboard:
         if proxy_wallet == 'N/A':
             lines = [
                 'Wallet status : Missing private key',
-                'Fix          : Fill POLYMARKET_PRIVATE_KEY when running `poly-monitor new`,',
-                '               or set POLY_PRIVATE_KEY / POLYMARKET_PRIVATE_KEY,',
-                '               or provide tasks/<task>/private_key.txt.',
+                'Fix           : Fill POLYMARKET_PRIVATE_KEY during `poly-monitor new`,',
+                '                or set POLY_PRIVATE_KEY / POLYMARKET_PRIVATE_KEY,',
+                '                or provide tasks/<task>/private_key.txt.',
             ]
             self._portfolio_cache = (time.time(), lines)
             return lines
 
+        body_width = SECTION_WIDTH - 2
         lines = [
-            f'EOA address   : {eoa}',
-            f'Proxy wallet  : {proxy_wallet}',
+            f'EOA address   : {self._truncate(eoa, body_width - 16)}',
+            f'Proxy wallet  : {self._truncate(proxy_wallet, body_width - 16)}',
             '',
         ]
         try:
@@ -198,17 +209,13 @@ class PolyMonitorDashboard:
                         continue
                     for key, value in item.items():
                         label = key.replace('Value', ' Value').replace('_', ' ').strip().title()
-                        if 'value' in key.lower() or 'balance' in key.lower() or 'profit' in key.lower():
-                            lines.append(f'  • {label:<22} {self._format_money(value)}')
-                        else:
-                            lines.append(f'  • {label:<22} {value}')
+                        display = self._format_money(value) if any(t in key.lower() for t in ('value', 'balance', 'profit')) else value
+                        lines.append(f'  • {label:<22} {display}')
             elif isinstance(value_data, dict):
                 for key, value in value_data.items():
                     label = key.replace('_', ' ').strip().title()
-                    if 'value' in key.lower() or 'balance' in key.lower() or 'profit' in key.lower():
-                        lines.append(f'  • {label:<22} {self._format_money(value)}')
-                    else:
-                        lines.append(f'  • {label:<22} {value}')
+                    display = self._format_money(value) if any(t in key.lower() for t in ('value', 'balance', 'profit')) else value
+                    lines.append(f'  • {label:<22} {display}')
             else:
                 lines.append('  • No portfolio summary available')
         except Exception as exc:
@@ -228,20 +235,20 @@ class PolyMonitorDashboard:
             ).json()
             lines.append('Recent activity')
             if isinstance(activity, list) and activity:
-                for row in activity[:8]:
+                for row in activity[:4]:
                     if not isinstance(row, dict):
                         continue
                     timestamp = self._format_ts(row.get('timestamp'))
-                    market = self._truncate(
-                        f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
-                        72,
-                    )
                     side = str(row.get('side', 'N/A')).upper()
                     action = str(row.get('type', 'N/A')).upper()
                     price = float(row.get('price', 0.0) or 0.0)
                     usdc = float(row.get('usdcSize', 0.0) or 0.0)
+                    market = self._truncate(
+                        f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
+                        body_width - 12,
+                    )
                     lines.append(f'  • {timestamp} | {action:<8} | {side:<4} | {price:>5.3f} | {usdc:>8.2f} USDC')
-                    lines.append(f'    Market: {market}')
+                    lines.append(f'    {market}')
             else:
                 lines.append('  • No recent activity found')
         except Exception as exc:
@@ -256,12 +263,12 @@ class PolyMonitorDashboard:
             ).json()
             lines.append('Open positions')
             if isinstance(positions, list) and positions:
-                for row in positions[:8]:
+                for row in positions[:4]:
                     if not isinstance(row, dict):
                         continue
                     label = self._truncate(
                         f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
-                        78,
+                        body_width - 20,
                     )
                     size = float(row.get('size', 0) or 0)
                     price = float(row.get('price', 0) or 0)
@@ -280,35 +287,37 @@ class PolyMonitorDashboard:
         if not tweets:
             return ['No tweets captured yet.']
 
+        body_width = SECTION_WIDTH - 2
         lines = ['Latest news stream']
-        for index, tweet in enumerate(reversed(tweets[-5:]), start=1):
+        for index, tweet in enumerate(reversed(tweets[-4:]), start=1):
             user = tweet.get('user', 'unknown')
             created_at = self._format_ts(tweet.get('created_at'))
             url = tweet.get('url') or 'N/A'
-            text = self._truncate(tweet.get('text', ''), 160)
+            text = self._truncate(tweet.get('text', ''), body_width - 6)
             lines.append(f'{index}. @{user} · {created_at}')
             lines.append(f'   {text}')
-            lines.append(f'   Link: {url}')
+            lines.append(f'   Link: {self._truncate(url, body_width - 9)}')
+            if index != min(4, len(tweets)):
+                lines.append('')
         return lines
 
     def _header_lines(self) -> list[str]:
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         init_time = str(self.cfg.get('TASK_INIT_TIME', 'N/A'))
-        version = '1.1.0'
         stats = self._stats()
-        lines: list[str] = []
         colors = ['\033[38;5;255m', '\033[38;5;252m', '\033[38;5;250m']
-        for i, line in enumerate(DASHBOARD_LOGO):
-            lines.append(f"{colors[i % len(colors)]}{line}{RESET}")
+        lines = [f"{colors[i % len(colors)]}{line}{RESET}" for i, line in enumerate(DASHBOARD_LOGO)]
         lines.extend(
             [
                 '',
                 f'Task name     : {self.task_name}',
-                f'Version       : {version}',
+                'Version       : 1.1.0',
                 f'Init time     : {init_time}',
                 f'Current time  : {now}',
                 f'Heartbeat     : {self._heartbeat()}',
-                f'Counters      : {stats["transactions"]} decisions | {stats["triggered_news"]} triggered news | {stats["tweets"]} tweets',
+                f'Decisions     : {stats["transactions"]}',
+                f'Triggered news: {stats["triggered_news"]}',
+                f'Tweets cached : {stats["tweets"]}',
             ]
         )
         return lines
@@ -320,18 +329,25 @@ class PolyMonitorDashboard:
         padding = max(width - self._visible_len(value), 0)
         return value + (' ' * padding)
 
+    def _normalize_section_lines(self, lines: list[str], style_name: str) -> list[str]:
+        visible_width = SECTION_WIDTH
+        max_lines = SECTION_HEIGHTS[style_name]
+        normalized = [self._pad_visible(self._truncate(line, visible_width), visible_width) for line in lines[:max_lines]]
+        while len(normalized) < max_lines:
+            normalized.append(' ' * visible_width)
+        return normalized
+
     def _box_section(self, title: str, lines: list[str], style_name: str) -> str:
         style = SECTION_STYLES[style_name]
-        plain_lines = lines or ['']
-        width = max(len(title) + 4, *(self._visible_len(line) for line in plain_lines))
         border = style['border']
         title_color = style['title']
         text_color = style['text']
-        top = f"{border}╭{'─' * (width + 2)}╮{RESET}"
-        title_line = f"{border}│{RESET} {title_color}{title.ljust(width)}{RESET} {border}│{RESET}"
-        divider = f"{border}├{'─' * (width + 2)}┤{RESET}"
-        body = [f"{border}│{RESET} {text_color}{self._pad_visible(line, width)}{RESET} {border}│{RESET}" for line in plain_lines]
-        bottom = f"{border}╰{'─' * (width + 2)}╯{RESET}"
+        normalized = self._normalize_section_lines(lines, style_name)
+        top = f"{border}╭{'─' * (SECTION_WIDTH + 2)}╮{RESET}"
+        title_line = f"{border}│{RESET} {title_color}{title.ljust(SECTION_WIDTH)}{RESET} {border}│{RESET}"
+        divider = f"{border}├{'─' * (SECTION_WIDTH + 2)}┤{RESET}"
+        body = [f"{border}│{RESET} {text_color}{line}{RESET} {border}│{RESET}" for line in normalized]
+        bottom = f"{border}╰{'─' * (SECTION_WIDTH + 2)}╯{RESET}"
         return '\n'.join([top, title_line, divider, *body, bottom])
 
     def render(self) -> str:
@@ -344,10 +360,17 @@ class PolyMonitorDashboard:
         return '\n\n'.join(blocks)
 
     def loop(self) -> None:
+        first_frame = True
         while True:
             self.cfg = load_task_config(self.task_dir)
-            self._clear()
-            print(self.render())
+            frame = self.render()
+            if first_frame:
+                self._clear()
+                print(frame, end='')
+                first_frame = False
+            else:
+                self._move_to_top()
+                print(frame, end='')
             sys.stdout.flush()
             time.sleep(self.refresh_seconds)
 
