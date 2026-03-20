@@ -37,7 +37,7 @@ HEARTBEAT_PALETTE = [
     '\033[1;38;5;159m●\033[0m',
     '\033[1;38;5;195m●\033[0m',
 ]
-SECTION_WIDTH = 112
+SECTION_WIDTH = 96
 SECTION_HEIGHTS = {
     'header': 13,
     'portfolio': 24,
@@ -166,9 +166,13 @@ class PolyMonitorDashboard:
 
     def _truncate(self, value: Any, width: int) -> str:
         text = str(value).replace('\n', ' ').strip()
-        if len(text) <= width:
+        if self._visible_len(text) <= width:
             return text
-        return f'{text[: width - 1]}…'
+
+        plain = ANSI_RE.sub('', text)
+        if len(plain) <= width:
+            return plain
+        return f'{plain[: width - 1]}…'
 
     def _format_money(self, value: Any) -> str:
         try:
