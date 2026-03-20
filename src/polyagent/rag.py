@@ -46,12 +46,6 @@ class EventRAG:
         return '\n'.join(parts)
 
     def _iter_market_candidates(self, event: dict[str, Any]) -> list[dict[str, Any]]:
-        child_options = event.get('child_options')
-        if isinstance(child_options, list) and child_options:
-            candidates = [opt for opt in child_options if str(opt.get('question', '')).strip()]
-            if candidates:
-                return candidates
-
         candidates: list[dict[str, Any]] = []
         for market in event.get('markets', []):
             try:
@@ -77,7 +71,7 @@ class EventRAG:
                 'question': fallback_title,
                 'description': str(event.get('description', '')),
                 'volume': float(event.get('volume', 0) or 0),
-                'group_item_title': fallback_title,
+                'groupItemTitle': fallback_title,
             }
         ]
 

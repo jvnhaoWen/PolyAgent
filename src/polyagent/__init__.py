@@ -1,1 +1,1 @@
-__all__ = ['app', 'cli', 'tasking', 'market', 'rag', 'runtime', 'decision']
+__all__ = ['app', 'cli', 'dashboard', 'tasking', 'market', 'rag', 'runtime', 'decision']

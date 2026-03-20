@@ -98,7 +98,7 @@ class MarketPipeline:
                 if not line:
                     continue
                 event = json.loads(line)
-                child_options = []
+                filtered_markets = []
 
                 for market in event.get('markets', []):
                     if str(market.get('acceptingOrders', '')).lower() != 'true':
@@ -121,27 +121,30 @@ class MarketPipeline:
                     if len(token_ids) < 2:
                         continue
 
-                    child_options.append(
+                    filtered_markets.append(
                         {
-                            'market_id': str(market.get('id', '')),
-                            'group_item_title': str(market.get('groupItemTitle', '')),
+                            **market,
+                            'id': str(market.get('id', '')),
                             'question': str(market.get('question', '')),
-                            'token_yes': str(token_ids[0]),
-                            'token_no': str(token_ids[1]),
+                            'groupItemTitle': str(market.get('groupItemTitle', '')),
+                            'description': str(market.get('description', event.get('description', ''))),
+                            'acceptingOrders': True,
+                            'clobTokenIds': [str(token_ids[0]), str(token_ids[1])],
                             'volume': float(market.get('volume', 0) or 0),
                         }
                     )
 
-                if not child_options:
+                if not filtered_markets:
                     continue
 
                 output = {
                     'event_id': str(event.get('id', '')),
+                    'id': str(event.get('id', '')),
                     'slug': str(event.get('slug', '')),
                     'title': str(event.get('title', '')),
                     'description': str(event.get('description', '')),
                     'volume': float(event.get('volume', 0) or 0),
-                    'child_options': sorted(child_options, key=lambda x: float(x.get('volume', 0)), reverse=True),
+                    'markets': sorted(filtered_markets, key=lambda x: float(x.get('volume', 0)), reverse=True),
                 }
                 fout.write(json.dumps(output, ensure_ascii=False) + '\n')
                 count += 1

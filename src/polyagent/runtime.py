@@ -196,6 +196,7 @@ class PolyMonitorRuntime:
             'event_id': best.event.get('event_id'),
             'event_title': best.event.get('title'),
             'score': best.score,
+            'matched_market': best.event.get('matched_market', {}),
             'openclaw_response': result.response,
         }
         logging.info('DECISION: %s', json.dumps(decision_summary, ensure_ascii=False))

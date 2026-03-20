@@ -28,11 +28,14 @@ For long-running monitoring, use a **global command in your shell session** and 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --no-cache-dir "git+https://github.com/pothitos/twikit.git@patch-1"
 pip install -e .
 poly-monitor new
 poly-monitor run --task <task_name>   # test mode: print all outputs
-poly-monitor start --task <task_name> # production mode: logs to task log
+poly-monitor start --task <task_name> # production mode: background worker + terminal dashboard
 ```
+
+> `twikit` from PyPI is no longer reliable here; install the `patch-1` GitHub build first.
 
 > Recommended: run `poly-monitor start --task xxx` and other operations in tmux so the session can stay alive.
 
@@ -41,14 +44,22 @@ poly-monitor start --task <task_name> # production mode: logs to task log
 ### Runtime flow
 1. `poly-monitor new` creates task config (`tasks/<task>/task_config.py`).
 2. Market pipeline fetches from Gamma API and filters active markets.
-3. RAG builds MiniLM + FAISS index.
+3. RAG builds vectors from real market questions; if no child market exists, it falls back to the event title.
 4. Twitter watcher polls watched users.
 5. If score reaches threshold, decision prompt is synthesized and sent to OpenClaw.
 6. Trade response and matched news are persisted into task logs.
 
 ### CLI modes
 - `run`: testing mode, keeps printing outputs in foreground.
-- `start`: production mode, runs in background and writes runtime output into `tasks/<task>/logs/task_runtime.log`.
+- `start`: production mode, starts the worker in background and shows a terminal dashboard refreshed every minute.
+
+### Start-mode dashboard
+The `start` dashboard shows exactly three terminal blocks:
+- top status banner: version, init time, current UTC time, heartbeat, transactions / triggered news counts.
+- portfolio block: EOA / proxy wallet, portfolio value summary, recent activity, open positions.
+- rolling news block: latest entries from `tasks/<task>/data/tweets.jsonl`.
+
+Private key lookup order for the dashboard: `POLYMARKET_PRIVATE_KEY`
 
 ### Core command
 ```bash
@@ -57,7 +68,7 @@ openclaw agent --message "<decision prompt>"
 
 ### Key logs
 - `tasks/<task>/logs/runtime_events.jsonl`: news, threshold-trigger records, synthesized prompts, and trade responses.
-- `tasks/<task>/logs/task_runtime.log`: production terminal-style runtime stream.
+- `tasks/<task>/logs/task_runtime.log`: background worker log stream.
 - `tasks/<task>/test/decision_records.jsonl`: detailed trigger debug records.
 
 ### Common task operations
