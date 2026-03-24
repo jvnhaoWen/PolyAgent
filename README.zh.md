@@ -61,6 +61,10 @@ poly-monitor start --task <task_name> # 实战模式：后台 worker + 终端仪
 
 ![运行界面](images/image.png)
 
+## 下单
+
+运行 `clawhub install polymarket-minimal-buy-python`，可直接从 ClawHub 安装该技能以启用下单能力（我们也会持续更新这个技能）。然后在安装后的 skill 文件夹中配置私钥。或者，你也可以直接让 OpenClaw 为你编写下单技能。
+
 ## 架构与用户指南（合并版）
 
 ### 运行主流程
