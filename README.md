@@ -45,6 +45,11 @@ poly-monitor start --task <task_name> # production mode: background worker + ter
 
 > Recommended: run `poly-monitor start --task xxx` and other operations in tmux so the session can stay alive.
 
+# Steps for Configuration
+![alt text](images/image2.png)
++ You can copy your Twitter auth_token and ct0 from the browser console to connect to your Twitter account without direct login or any web scraping. Then configure your list of monitored users—provided that you are already following them on Twitter—so that poly-monitor can continuously track updates based on [twikit](https://github.com/d60/twikit)！
++ Enter your decentralized wallet private key locally (MetaMask, Phantom, Coinbase, etc.—MetaMask is recommended). Please pay attention to wallet security; it is recommended to use a small test wallet private key first. Poly-monitor runs locally, so there is no need to log in to a Polymarket account or upload any wallet information.
++ You can also customize and modify your WATCH_USERS list in the task_config.py file located at ~/.openclaw/workspace/skills/public/polyagent to add users you want to monitor or just call your openclaw to do it for you!
 ## Steps for Configuration
 
 ![config guide](images/image2.png)
@@ -56,6 +61,10 @@ poly-monitor start --task <task_name> # production mode: background worker + ter
 
 ![start panel](images/image1.png)
 
+![alt text](images/image1.png)
+`poly-monitor start --task <your task name>`:
+Just enjoy and see whether your information sources can actually help OpenClaw make some lucky shots！
+![alt text](images/image.png)
 `poly-monitor start --task <your task name>` starts the background worker plus dashboard.
 
 ![runtime panel](images/image.png)
