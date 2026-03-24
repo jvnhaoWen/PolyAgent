@@ -3,13 +3,22 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
+from rich import box
+from rich.columns import Columns
+from rich.console import Console, Group
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.table import Table
+from rich.text import Text
 
 from .tasking import load_task_config
 
@@ -22,55 +31,104 @@ DASHBOARD_LOGO = [
     '╚═╝      ╚═════╝ ╚══════╝╚═╝       ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝',
 ]
 
-RESET = '\033[0m'
-ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
-SECTION_STYLES = {
-    'header': {'border': '\033[38;5;81m', 'title': '\033[1;38;5;117m', 'text': '\033[38;5;252m'},
-    'portfolio': {'border': '\033[38;5;114m', 'title': '\033[1;38;5;120m', 'text': '\033[38;5;255m'},
-    'news': {'border': '\033[38;5;221m', 'title': '\033[1;38;5;228m', 'text': '\033[38;5;255m'},
-}
-HEARTBEAT_PALETTE = [
-    '\033[1;38;5;45m●\033[0m',
-    '\033[1;38;5;51m●\033[0m',
-    '\033[1;38;5;87m●\033[0m',
-    '\033[1;38;5;123m●\033[0m',
-    '\033[1;38;5;159m●\033[0m',
-    '\033[1;38;5;195m●\033[0m',
-]
-SECTION_WIDTH = 96
-SECTION_HEIGHTS = {
-    'header': 13,
-    'portfolio': 24,
-    'news': 18,
-}
+VERSION = '1.2.0'
+HTTP_TIMEOUT = 20
+WALLET_CACHE_TTL = 30
+PORTFOLIO_CACHE_TTL = 30
+MAX_ACTIVITY_ROWS = 6
+MAX_POSITION_ROWS = 6
+MAX_NEWS_ITEMS = 5
+
+_CAMEL_RE_1 = re.compile(r'(.)([A-Z][a-z]+)')
+_CAMEL_RE_2 = re.compile(r'([a-z0-9])([A-Z])')
+
+
+@dataclass(slots=True)
+class Stats:
+    decisions: int = 0
+    triggered_news: int = 0
+    tweets: int = 0
+
+
+@dataclass(slots=True)
+class ActivityItem:
+    timestamp: str
+    action: str
+    side: str
+    price: str
+    usdc: str
+    market: str
+
+
+@dataclass(slots=True)
+class PositionItem:
+    market: str
+    size: str
+    avg_price: str
+
+
+@dataclass(slots=True)
+class NewsItem:
+    user: str
+    created_at: str
+    text: str
+    url: str
+
+
+@dataclass(slots=True)
+class PortfolioData:
+    eoa: str = 'N/A'
+    proxy_wallet: str = 'N/A'
+    summary: dict[str, str] = field(default_factory=dict)
+    activity: list[ActivityItem] = field(default_factory=list)
+    positions: list[PositionItem] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DashboardSnapshot:
+    task_name: str
+    version: str
+    init_time: str
+    now_utc: str
+    heartbeat_style: str
+    stats: Stats
+    portfolio: PortfolioData
+    news: list[NewsItem]
 
 
 class PolyMonitorDashboard:
+    HEARTBEAT_STYLES = [
+        'bold bright_cyan',
+        'bold cyan',
+        'bold bright_blue',
+        'bold bright_magenta',
+        'bold bright_green',
+        'bold bright_white',
+    ]
+
     def __init__(self, task_name: str, refresh_seconds: int = 1) -> None:
         self.task_name = task_name
         self.task_dir = Path('tasks') / task_name
         self.cfg = load_task_config(self.task_dir)
         self.refresh_seconds = refresh_seconds
+
         self.paths = {
             'tweets': self.task_dir / 'data' / 'tweets.jsonl',
             'runtime': self.task_dir / 'logs' / 'runtime_events.jsonl',
-            'decision_records': self.task_dir / 'test' / 'decision_records.jsonl',
             'private_key_task': self.task_dir / 'private_key.txt',
             'private_key_root': Path('.private_key'),
         }
+
+        self.console = Console()
+        self.session = requests.Session()
+        self.session.headers.update({'User-Agent': 'polyagent-dashboard/1.2.0'})
+
         self._wallet_cache: tuple[float, tuple[str, str]] | None = None
-        self._portfolio_cache: tuple[float, list[str]] | None = None
+        self._portfolio_cache: tuple[float, PortfolioData] | None = None
 
-    def _clear(self) -> None:
-        sys.stdout.write('\033[2J\033[H')
-        sys.stdout.flush()
-
-    def _move_to_top(self) -> None:
-        sys.stdout.write('\033[H')
-        sys.stdout.flush()
-
-    def _heartbeat(self) -> str:
-        return HEARTBEAT_PALETTE[int(time.time()) % len(HEARTBEAT_PALETTE)]
+    def _heartbeat_style(self) -> str:
+        return self.HEARTBEAT_STYLES[int(time.time()) % len(self.HEARTBEAT_STYLES)]
 
     def _read_private_key(self) -> str | None:
         config_key = str(self.cfg.get('POLYMARKET_PRIVATE_KEY', '')).strip()
@@ -84,41 +142,24 @@ class PolyMonitorDashboard:
 
         for path in (self.paths['private_key_task'], self.paths['private_key_root']):
             if path.exists():
-                value = path.read_text(encoding='utf-8').strip()
+                try:
+                    value = path.read_text(encoding='utf-8').strip()
+                except Exception:
+                    continue
                 if value:
                     return value
+
         return None
 
-    def _wallet_summary(self) -> tuple[str, str]:
-        if self._wallet_cache and (time.time() - self._wallet_cache[0] < 30):
-            return self._wallet_cache[1]
-
-        private_key = self._read_private_key()
-        if not private_key:
-            result = ('N/A', 'N/A')
-            self._wallet_cache = (time.time(), result)
-            return result
-
-        from eth_account import Account
-
-        eoa = Account.from_key(private_key).address
-        try:
-            profile_resp = requests.get(
-                'https://gamma-api.polymarket.com/public-profile',
-                params={'address': eoa},
-                timeout=20,
-            )
-            profile = profile_resp.json()
-            proxy_wallet = profile.get('proxyWallet') or eoa
-        except Exception:
-            proxy_wallet = eoa
-        result = (eoa, proxy_wallet)
-        self._wallet_cache = (time.time(), result)
-        return result
+    def _get_json(self, url: str, *, params: dict[str, Any] | None = None) -> Any:
+        response = self.session.get(url, params=params, timeout=HTTP_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
 
     def _safe_jsonl_rows(self, path: Path) -> list[dict[str, Any]]:
         if not path.exists():
             return []
+
         rows: list[dict[str, Any]] = []
         try:
             with path.open('r', encoding='utf-8') as fh:
@@ -134,22 +175,23 @@ class PolyMonitorDashboard:
                         rows.append(row)
         except Exception:
             return []
+
         return rows
 
-    def _stats(self) -> dict[str, int]:
+    def _stats(self) -> Stats:
         runtime_rows = self._safe_jsonl_rows(self.paths['runtime'])
         tweets_rows = self._safe_jsonl_rows(self.paths['tweets'])
-        transactions = sum(1 for row in runtime_rows if row.get('type') == 'decision')
-        triggered_news = sum(1 for row in runtime_rows if row.get('type') == 'trigger_record')
-        return {
-            'transactions': transactions,
-            'triggered_news': triggered_news,
-            'tweets': len(tweets_rows),
-        }
+
+        return Stats(
+            decisions=sum(1 for row in runtime_rows if row.get('type') == 'decision'),
+            triggered_news=sum(1 for row in runtime_rows if row.get('type') == 'trigger_record'),
+            tweets=len(tweets_rows),
+        )
 
     def _format_ts(self, value: Any) -> str:
         if value in (None, ''):
             return 'N/A'
+
         if isinstance(value, (int, float)):
             try:
                 stamp = float(value)
@@ -158,21 +200,16 @@ class PolyMonitorDashboard:
                 return datetime.fromtimestamp(stamp, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
             except Exception:
                 return str(value)
+
         text = str(value)
         try:
-            return datetime.fromisoformat(text.replace('Z', '+00:00')).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            return (
+                datetime.fromisoformat(text.replace('Z', '+00:00'))
+                .astimezone(timezone.utc)
+                .strftime('%Y-%m-%d %H:%M:%S UTC')
+            )
         except Exception:
             return text
-
-    def _truncate(self, value: Any, width: int) -> str:
-        text = str(value).replace('\n', ' ').strip()
-        if self._visible_len(text) <= width:
-            return text
-
-        plain = ANSI_RE.sub('', text)
-        if len(plain) <= width:
-            return plain
-        return f'{plain[: width - 1]}…'
 
     def _format_money(self, value: Any) -> str:
         try:
@@ -180,54 +217,105 @@ class PolyMonitorDashboard:
         except Exception:
             return str(value)
 
-    def _portfolio_lines(self, eoa: str, proxy_wallet: str) -> list[str]:
-        if self._portfolio_cache and (time.time() - self._portfolio_cache[0] < 30):
+    def _format_decimal(self, value: Any, digits: int = 3) -> str:
+        try:
+            return f'{float(value):.{digits}f}'
+        except Exception:
+            return str(value)
+
+    def _humanize_key(self, key: str) -> str:
+        step1 = _CAMEL_RE_1.sub(r'\1 \2', key)
+        step2 = _CAMEL_RE_2.sub(r'\1 \2', step1)
+        return step2.replace('_', ' ').strip().title()
+
+    def _short_address(self, value: str) -> str:
+        if value == 'N/A' or len(value) < 18:
+            return value
+        return f'{value[:10]}…{value[-8:]}'
+
+    def _wallet_summary(self) -> tuple[str, str]:
+        if self._wallet_cache and (time.time() - self._wallet_cache[0] < WALLET_CACHE_TTL):
+            return self._wallet_cache[1]
+
+        private_key = self._read_private_key()
+        if not private_key:
+            result = ('N/A', 'N/A')
+            self._wallet_cache = (time.time(), result)
+            return result
+
+        from eth_account import Account
+
+        eoa = Account.from_key(private_key).address
+        proxy_wallet = eoa
+
+        try:
+            profile = self._get_json(
+                'https://gamma-api.polymarket.com/public-profile',
+                params={'address': eoa},
+            )
+            if isinstance(profile, dict):
+                proxy_wallet = str(profile.get('proxyWallet') or eoa)
+        except Exception:
+            proxy_wallet = eoa
+
+        result = (eoa, proxy_wallet)
+        self._wallet_cache = (time.time(), result)
+        return result
+
+    def _extract_summary(self, value_data: Any) -> dict[str, str]:
+        result: dict[str, str] = {}
+
+        def put_items(obj: dict[str, Any]) -> None:
+            for key, value in obj.items():
+                if isinstance(value, (dict, list)):
+                    continue
+                label = self._humanize_key(str(key))
+                lowered = str(key).lower()
+                if any(token in lowered for token in ('value', 'balance', 'profit', 'pnl', 'usdc')):
+                    result[label] = self._format_money(value)
+                else:
+                    result[label] = str(value)
+
+        if isinstance(value_data, dict):
+            put_items(value_data)
+        elif isinstance(value_data, list):
+            for item in value_data:
+                if isinstance(item, dict):
+                    put_items(item)
+
+        return result
+
+    def _fetch_portfolio(self, eoa: str, proxy_wallet: str) -> PortfolioData:
+        if self._portfolio_cache and (time.time() - self._portfolio_cache[0] < PORTFOLIO_CACHE_TTL):
             return self._portfolio_cache[1]
 
-        if proxy_wallet == 'N/A':
-            lines = [
-                'Wallet status : Missing private key',
-                'Fix           : Fill POLYMARKET_PRIVATE_KEY during `poly-monitor new`,',
-                '                or set POLY_PRIVATE_KEY / POLYMARKET_PRIVATE_KEY,',
-                '                or provide tasks/<task>/private_key.txt.',
-            ]
-            self._portfolio_cache = (time.time(), lines)
-            return lines
+        portfolio = PortfolioData(eoa=eoa, proxy_wallet=proxy_wallet)
 
-        body_width = SECTION_WIDTH - 2
-        lines = [
-            f'EOA address   : {self._truncate(eoa, body_width - 16)}',
-            f'Proxy wallet  : {self._truncate(proxy_wallet, body_width - 16)}',
-            '',
-        ]
+        if proxy_wallet == 'N/A':
+            portfolio.notes.extend(
+                [
+                    'Wallet status: missing private key.',
+                    'Fill POLYMARKET_PRIVATE_KEY in task config,',
+                    'or set POLY_PRIVATE_KEY / POLYMARKET_PRIVATE_KEY in env,',
+                    'or create tasks/<task>/private_key.txt.',
+                ]
+            )
+            self._portfolio_cache = (time.time(), portfolio)
+            return portfolio
+
         try:
-            value_data = requests.get(
+            value_data = self._get_json(
                 'https://data-api.polymarket.com/value',
                 params={'user': proxy_wallet},
-                timeout=20,
-            ).json()
-            lines.append('Portfolio value summary')
-            if isinstance(value_data, list):
-                for item in value_data:
-                    if not isinstance(item, dict):
-                        continue
-                    for key, value in item.items():
-                        label = key.replace('Value', ' Value').replace('_', ' ').strip().title()
-                        display = self._format_money(value) if any(t in key.lower() for t in ('value', 'balance', 'profit')) else value
-                        lines.append(f'  • {label:<22} {display}')
-            elif isinstance(value_data, dict):
-                for key, value in value_data.items():
-                    label = key.replace('_', ' ').strip().title()
-                    display = self._format_money(value) if any(t in key.lower() for t in ('value', 'balance', 'profit')) else value
-                    lines.append(f'  • {label:<22} {display}')
-            else:
-                lines.append('  • No portfolio summary available')
+            )
+            portfolio.summary = self._extract_summary(value_data)
+            if not portfolio.summary:
+                portfolio.notes.append('No portfolio summary available.')
         except Exception as exc:
-            lines.append(f'Portfolio fetch failed: {exc}')
+            portfolio.notes.append(f'Portfolio summary fetch failed: {exc}')
 
-        lines.append('')
         try:
-            activity = requests.get(
+            activity_data = self._get_json(
                 'https://data-api.polymarket.com/activity',
                 params={
                     'user': proxy_wallet,
@@ -235,148 +323,314 @@ class PolyMonitorDashboard:
                     'sortBy': 'TIMESTAMP',
                     'sortDirection': 'DESC',
                 },
-                timeout=20,
-            ).json()
-            lines.append('Recent activity')
-            if isinstance(activity, list) and activity:
-                for row in activity[:4]:
+            )
+            if isinstance(activity_data, list):
+                for row in activity_data[:MAX_ACTIVITY_ROWS]:
                     if not isinstance(row, dict):
                         continue
-                    timestamp = self._format_ts(row.get('timestamp'))
-                    side = str(row.get('side', 'N/A')).upper()
-                    action = str(row.get('type', 'N/A')).upper()
-                    price = float(row.get('price', 0.0) or 0.0)
-                    usdc = float(row.get('usdcSize', 0.0) or 0.0)
-                    market = self._truncate(
-                        f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
-                        body_width - 12,
+                    portfolio.activity.append(
+                        ActivityItem(
+                            timestamp=self._format_ts(row.get('timestamp')),
+                            action=str(row.get('type', 'N/A')).upper(),
+                            side=str(row.get('side', 'N/A')).upper(),
+                            price=self._format_decimal(row.get('price', 0), 3),
+                            usdc=self._format_decimal(row.get('usdcSize', 0), 2),
+                            market=f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
+                        )
                     )
-                    lines.append(f'  • {timestamp} | {action:<8} | {side:<4} | {price:>5.3f} | {usdc:>8.2f} USDC')
-                    lines.append(f'    {market}')
-            else:
-                lines.append('  • No recent activity found')
+            if not portfolio.activity:
+                portfolio.notes.append('No recent activity found.')
         except Exception as exc:
-            lines.append(f'Activity fetch failed: {exc}')
+            portfolio.notes.append(f'Activity fetch failed: {exc}')
 
-        lines.append('')
         try:
-            positions = requests.get(
+            positions_data = self._get_json(
                 'https://data-api.polymarket.com/positions',
                 params={'user': proxy_wallet, 'sizeThreshold': 0.01},
-                timeout=20,
-            ).json()
-            lines.append('Open positions')
-            if isinstance(positions, list) and positions:
-                for row in positions[:4]:
+            )
+            if isinstance(positions_data, list):
+                for row in positions_data[:MAX_POSITION_ROWS]:
                     if not isinstance(row, dict):
                         continue
-                    label = self._truncate(
-                        f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
-                        body_width - 20,
+                    portfolio.positions.append(
+                        PositionItem(
+                            market=f"{row.get('title', 'Unknown')} ({str(row.get('outcome', '')).strip() or 'N/A'})",
+                            size=self._format_decimal(row.get('size', 0), 2),
+                            avg_price=self._format_decimal(row.get('price', 0), 3),
+                        )
                     )
-                    size = float(row.get('size', 0) or 0)
-                    price = float(row.get('price', 0) or 0)
-                    lines.append(f'  • {label}')
-                    lines.append(f'    Size: {size:.2f} | Avg price: {price:.3f}')
-            else:
-                lines.append('  • No open positions found')
+            if not portfolio.positions:
+                portfolio.notes.append('No open positions found.')
         except Exception as exc:
-            lines.append(f'Position fetch failed: {exc}')
+            portfolio.notes.append(f'Position fetch failed: {exc}')
 
-        self._portfolio_cache = (time.time(), lines)
-        return lines
+        self._portfolio_cache = (time.time(), portfolio)
+        return portfolio
 
-    def _news_lines(self) -> list[str]:
+    def _news_items(self) -> list[NewsItem]:
         tweets = self._safe_jsonl_rows(self.paths['tweets'])
         if not tweets:
-            return ['No tweets captured yet.']
+            return []
 
-        body_width = SECTION_WIDTH - 2
-        lines = ['Latest news stream']
-        for index, tweet in enumerate(reversed(tweets[-4:]), start=1):
-            user = tweet.get('user', 'unknown')
-            created_at = self._format_ts(tweet.get('created_at'))
-            url = tweet.get('url') or 'N/A'
-            text = self._truncate(tweet.get('text', ''), body_width - 6)
-            lines.append(f'{index}. @{user} · {created_at}')
-            lines.append(f'   {text}')
-            lines.append(f'   Link: {self._truncate(url, body_width - 9)}')
-            if index != min(4, len(tweets)):
-                lines.append('')
-        return lines
+        items: list[NewsItem] = []
+        for tweet in reversed(tweets[-MAX_NEWS_ITEMS:]):
+            items.append(
+                NewsItem(
+                    user=str(tweet.get('user', 'unknown')),
+                    created_at=self._format_ts(tweet.get('created_at')),
+                    text=str(tweet.get('text', '')).replace('\n', ' ').strip(),
+                    url=str(tweet.get('url') or 'N/A'),
+                )
+            )
+        return items
 
-    def _header_lines(self) -> list[str]:
-        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-        init_time = str(self.cfg.get('TASK_INIT_TIME', 'N/A'))
-        stats = self._stats()
-        colors = ['\033[38;5;255m', '\033[38;5;252m', '\033[38;5;250m']
-        lines = [f"{colors[i % len(colors)]}{line}{RESET}" for i, line in enumerate(DASHBOARD_LOGO)]
-        lines.extend(
+    def _build_snapshot(self) -> DashboardSnapshot:
+        eoa, proxy_wallet = self._wallet_summary()
+        portfolio = self._fetch_portfolio(eoa, proxy_wallet)
+
+        return DashboardSnapshot(
+            task_name=self.task_name,
+            version=VERSION,
+            init_time=str(self.cfg.get('TASK_INIT_TIME', 'N/A')),
+            now_utc=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            heartbeat_style=self._heartbeat_style(),
+            stats=self._stats(),
+            portfolio=portfolio,
+            news=self._news_items(),
+        )
+
+    def _kv_table(self, rows: list[tuple[str, Any]], *, key_style: str = 'bold white') -> Table:
+        table = Table.grid(expand=True)
+        table.add_column(style=key_style, no_wrap=True)
+        table.add_column(style='white')
+        for key, value in rows:
+            table.add_row(key, value)
+        return table
+
+    def _render_logo(self) -> Text:
+        text = Text()
+        for idx, line in enumerate(DASHBOARD_LOGO):
+            style = 'bold bright_cyan' if idx < 2 else 'bold cyan'
+            text.append(line, style=style)
+            if idx != len(DASHBOARD_LOGO) - 1:
+                text.append('\n')
+        return text
+
+    def _render_header(self, snapshot: DashboardSnapshot, width: int) -> Panel:
+        show_big_logo = width >= max(len(line) for line in DASHBOARD_LOGO) + 8
+        top_renderable: Any = self._render_logo() if show_big_logo else Text('POLY MONITOR', style='bold bright_cyan')
+
+        heartbeat = Text('●', style=snapshot.heartbeat_style)
+        stats_grid = self._kv_table(
             [
-                '',
-                f'Task name     : {self.task_name}',
-                'Version       : 1.1.0',
-                f'Init time     : {init_time}',
-                f'Current time  : {now}',
-                f'Heartbeat     : {self._heartbeat()}',
-                f'Decisions     : {stats["transactions"]}',
-                f'Triggered news: {stats["triggered_news"]}',
-                f'Tweets cached : {stats["tweets"]}',
+                ('Task', snapshot.task_name),
+                ('Version', snapshot.version),
+                ('Init time', snapshot.init_time),
+                ('Current time', snapshot.now_utc),
+                ('Heartbeat', heartbeat),
+                ('Decisions', str(snapshot.stats.decisions)),
+                ('Triggered news', str(snapshot.stats.triggered_news)),
+                ('Tweets cached', str(snapshot.stats.tweets)),
             ]
         )
-        return lines
 
-    def _visible_len(self, value: str) -> int:
-        return len(ANSI_RE.sub('', value))
+        body = Group(top_renderable, Rule(style='cyan'), stats_grid)
+        return Panel(
+            body,
+            title='[bold bright_cyan]System Status[/bold bright_cyan]',
+            border_style='bright_cyan',
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
 
-    def _pad_visible(self, value: str, width: int) -> str:
-        padding = max(width - self._visible_len(value), 0)
-        return value + (' ' * padding)
+    def _render_summary_panel(self, portfolio: PortfolioData) -> Panel:
+        if portfolio.summary:
+            table = Table(box=box.SIMPLE_HEAVY, expand=True)
+            table.add_column('Metric', style='bold white')
+            table.add_column('Value', style='green')
+            for key in sorted(portfolio.summary.keys()):
+                table.add_row(key, portfolio.summary[key])
+            body: Any = table
+        else:
+            body = Text('No portfolio summary available.', style='yellow')
 
-    def _normalize_section_lines(self, lines: list[str], style_name: str) -> list[str]:
-        visible_width = SECTION_WIDTH
-        max_lines = SECTION_HEIGHTS[style_name]
-        normalized = [self._pad_visible(self._truncate(line, visible_width), visible_width) for line in lines[:max_lines]]
-        while len(normalized) < max_lines:
-            normalized.append(' ' * visible_width)
-        return normalized
+        return Panel(
+            body,
+            title='[bold green]Summary[/bold green]',
+            border_style='green',
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
 
-    def _box_section(self, title: str, lines: list[str], style_name: str) -> str:
-        style = SECTION_STYLES[style_name]
-        border = style['border']
-        title_color = style['title']
-        text_color = style['text']
-        normalized = self._normalize_section_lines(lines, style_name)
-        top = f"{border}╭{'─' * (SECTION_WIDTH + 2)}╮{RESET}"
-        title_line = f"{border}│{RESET} {title_color}{title.ljust(SECTION_WIDTH)}{RESET} {border}│{RESET}"
-        divider = f"{border}├{'─' * (SECTION_WIDTH + 2)}┤{RESET}"
-        body = [f"{border}│{RESET} {text_color}{line}{RESET} {border}│{RESET}" for line in normalized]
-        bottom = f"{border}╰{'─' * (SECTION_WIDTH + 2)}╯{RESET}"
-        return '\n'.join([top, title_line, divider, *body, bottom])
+    def _render_activity_panel(self, portfolio: PortfolioData) -> Panel:
+        if portfolio.activity:
+            table = Table(box=box.SIMPLE_HEAVY, expand=True)
+            table.add_column('Time', style='dim', no_wrap=True)
+            table.add_column('Action', style='cyan', no_wrap=True)
+            table.add_column('Side', style='magenta', no_wrap=True)
+            table.add_column('Price', justify='right', style='white', no_wrap=True)
+            table.add_column('USDC', justify='right', style='green', no_wrap=True)
+            table.add_column('Market', style='white', overflow='fold')
 
-    def render(self) -> str:
-        eoa, proxy_wallet = self._wallet_summary()
-        blocks = [
-            self._box_section('SYSTEM STATUS', self._header_lines(), 'header'),
-            self._box_section('PORTFOLIO OVERVIEW', self._portfolio_lines(eoa, proxy_wallet), 'portfolio'),
-            self._box_section('NEWS FEED', self._news_lines(), 'news'),
-        ]
-        return '\n\n'.join(blocks)
+            for item in portfolio.activity:
+                table.add_row(item.timestamp, item.action, item.side, item.price, item.usdc, item.market)
+            body = table
+        else:
+            body = Text('No recent activity found.', style='yellow')
+
+        return Panel(
+            body,
+            title='[bold green]Recent Activity[/bold green]',
+            border_style='green',
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+    def _render_positions_panel(self, portfolio: PortfolioData) -> Panel:
+        if portfolio.positions:
+            table = Table(box=box.SIMPLE_HEAVY, expand=True)
+            table.add_column('Market', style='white', overflow='fold')
+            table.add_column('Size', justify='right', style='cyan', no_wrap=True)
+            table.add_column('Avg Price', justify='right', style='green', no_wrap=True)
+
+            for item in portfolio.positions:
+                table.add_row(item.market, item.size, item.avg_price)
+            body = table
+        else:
+            body = Text('No open positions found.', style='yellow')
+
+        return Panel(
+            body,
+            title='[bold green]Open Positions[/bold green]',
+            border_style='green',
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+    def _render_portfolio(self, portfolio: PortfolioData, width: int) -> Panel:
+        wallet_grid = self._kv_table(
+            [
+                ('EOA', self._short_address(portfolio.eoa)),
+                ('Proxy wallet', self._short_address(portfolio.proxy_wallet)),
+            ]
+        )
+
+        notes_renderables: list[Any] = []
+        if portfolio.notes:
+            notes = Text()
+            for idx, note in enumerate(portfolio.notes):
+                notes.append(f'• {note}', style='yellow')
+                if idx != len(portfolio.notes) - 1:
+                    notes.append('\n')
+            notes_renderables.extend([Rule(style='grey35'), notes])
+
+        inner_width = max(width - 8, 80)
+        if inner_width >= 180:
+            lower: Any = Columns(
+                [
+                    self._render_summary_panel(portfolio),
+                    self._render_activity_panel(portfolio),
+                    self._render_positions_panel(portfolio),
+                ],
+                expand=True,
+                equal=True,
+            )
+        elif inner_width >= 130:
+            lower = Group(
+                Columns(
+                    [
+                        self._render_summary_panel(portfolio),
+                        self._render_positions_panel(portfolio),
+                    ],
+                    expand=True,
+                    equal=True,
+                ),
+                self._render_activity_panel(portfolio),
+            )
+        else:
+            lower = Group(
+                self._render_summary_panel(portfolio),
+                self._render_activity_panel(portfolio),
+                self._render_positions_panel(portfolio),
+            )
+
+        body = Group(wallet_grid, Rule(style='green'), lower, *notes_renderables)
+        return Panel(
+            body,
+            title='[bold green]Portfolio Overview[/bold green]',
+            border_style='green',
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+
+    def _render_news(self, news: list[NewsItem]) -> Panel:
+        if not news:
+            return Panel(
+                Text('No tweets captured yet.', style='yellow'),
+                title='[bold yellow]News Feed[/bold yellow]',
+                border_style='yellow',
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+
+        parts: list[Any] = []
+        for idx, item in enumerate(news):
+            header = Text()
+            header.append(f'@{item.user}', style='bold yellow')
+            header.append('  ')
+            header.append(item.created_at, style='dim')
+            body = Text(item.text or '(empty)', style='white')
+            link = Text(item.url, style='cyan')
+            parts.extend([header, body, link])
+            if idx != len(news) - 1:
+                parts.append(Rule(style='grey35'))
+
+        return Panel(
+            Group(*parts),
+            title='[bold yellow]News Feed[/bold yellow]',
+            border_style='yellow',
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+
+    def render(self) -> Layout:
+        snapshot = self._build_snapshot()
+        width = self.console.size.width
+
+        layout = Layout(name='root')
+        layout.split_column(
+            Layout(name='header', size=14 if width >= 120 else 10),
+            Layout(name='body'),
+        )
+
+        if width >= 160:
+            layout['body'].split_row(
+                Layout(name='portfolio', ratio=2),
+                Layout(name='news', ratio=1),
+            )
+        else:
+            layout['body'].split_column(
+                Layout(name='portfolio', ratio=3),
+                Layout(name='news', ratio=2),
+            )
+
+        layout['header'].update(self._render_header(snapshot, width))
+        layout['portfolio'].update(self._render_portfolio(snapshot.portfolio, width))
+        layout['news'].update(self._render_news(snapshot.news))
+        return layout
 
     def loop(self) -> None:
-        first_frame = True
-        while True:
-            self.cfg = load_task_config(self.task_dir)
-            frame = self.render()
-            if first_frame:
-                self._clear()
-                print(frame, end='')
-                first_frame = False
-            else:
-                self._move_to_top()
-                print(frame, end='')
-            sys.stdout.flush()
-            time.sleep(self.refresh_seconds)
+        with Live(
+            self.render(),
+            console=self.console,
+            screen=True,
+            auto_refresh=False,
+            transient=False,
+        ) as live:
+            while True:
+                self.cfg = load_task_config(self.task_dir)
+                live.update(self.render(), refresh=True)
+                time.sleep(self.refresh_seconds)
 
 
 def run_dashboard(task_name: str) -> None:
