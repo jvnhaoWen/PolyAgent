@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polyagent"
-version = "1.1.0"
+version = "1.2.0"
 description = "Prompt-driven OpenClaw Polymarket Twitter monitor"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
+  "rich>=13.7.0",
   "twikit @ git+https://github.com/pothitos/twikit.git@patch-1",
   "eth-account>=0.13.0",
   "sentence-transformers>=2.7.0",

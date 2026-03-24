@@ -100,7 +100,7 @@ class PolyMonitorRuntime:
 
         print('')
         print(self._render_logo())
-        print(f"POLY MONITOR v1.1.0 | started at {self.started_at} (UTC)")
+        print(f"POLY MONITOR v1.2.0 | started at {self.started_at} (UTC)")
         print('█▄█▄█▄█▄█▄█▄█▄█▄█▄█')
         print(f"Heartbeat {heartbeat_color}")
         print(f"Markets: {self.stats['markets']}")
