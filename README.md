@@ -21,6 +21,59 @@
 
 </div>
 
+# PolyAgent(Polymonitor)
+
+Polymonitor is a lightweight, fully local AI trading agent framework built with Python. It enables users to monitor real-time information, match market opportunities via RAG, and execute automated trading decisions based on Openclaw.
+
+### Overview
+
+PolyAgent provides a complete end-to-end (7*24h) pipeline:
+
+```
+Twitter News Stream & Polymarket events
+        ↓
+Local RAG Matching (MiniLM + FAISS)
+        ↓
+Market Selection
+        ↓
+OpenClaw Decision Engine
+        ↓
+Local Wallet Execution(Metamask)
+        ↓
+Dashboard Monitoring
+```
+## Core Capabilities
+*Lightweight Local Deployment* 💻
++ Fully local execution (no cloud dependency)
++ Runs with:
+~2GB RAM
+Single-core CPU
++ Suitable for low-spec servers and personal machines
+
+*Market Data Pipeline*📊 
++ Automatically fetches Polymarket events based on your keywords
++ Filters active and tradable markets
+Builds local structured datasets based on Polymarket api
+
+*RAG-based Market Matching*🔍
+
++ Uses `sentence-transformer:all-MiniLM-L6-v` model embeddings + FAISS indexing
++ Converts markets into vector space
++ Matches real-time news to relevant markets
+Enables precise trigger detection
+
+*Real-time News Monitoring*🐦
++ Twitter streaming via configured watchlist based on [twikit](https://github.com/d60/twikit)
++ Low-latency polling
+
+*Autonomous Decision Engine*🦞
++ Prompt-based reasoning with OpenClaw agent
++ Determines:
+Whether to trade/
+Which market to select/
+Buy YES / NO
++ Directly executes trades via integrated skill
+
 ## Quick Start (recommend in tmux)
 
 For long-running monitoring, use a **global command in your shell session** and run inside `tmux`.
