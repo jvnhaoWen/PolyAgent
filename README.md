@@ -24,6 +24,11 @@
 ## Quick Start (recommend in tmux)
 
 For long-running monitoring, use a **global command in your shell session** and run inside `tmux`.
+```bash
+sudo apt update
+sudo apt install tmux -y
+tmux
+```
 
 ```bash
 python3 -m venv .venv
@@ -48,7 +53,7 @@ poly-monitor start --task <task_name> # production mode: background worker + ter
 ![alt text](images/image1.png)
 `poly-monitor start --task <your task name>`:
 Just enjoy and see whether your information sources can actually help OpenClaw make some lucky shots！
-![alt text](iamges/image.png)
+![alt text](images/image.png)
 
 ## Unified Architecture + User Guide
 
