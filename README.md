@@ -50,7 +50,6 @@ poly-monitor start --task <task_name> # production mode: background worker + ter
 + You can copy your Twitter auth_token and ct0 from the browser console to connect to your Twitter account without direct login or any web scraping. Then configure your list of monitored users—provided that you are already following them on Twitter—so that poly-monitor can continuously track updates based on [twikit](https://github.com/d60/twikit)！
 + Enter your decentralized wallet private key locally (MetaMask, Phantom, Coinbase, etc.—MetaMask is recommended). Please pay attention to wallet security; it is recommended to use a small test wallet private key first. Poly-monitor runs locally, so there is no need to log in to a Polymarket account or upload any wallet information.
 + You can also edit `WATCH_USERS` manually in `tasks/<task_name>/task_config.py` to add users you want to monitor or just call your openclaw to do it for you!
-## Steps for Configuration
 
 ![start panel](images/image1.png)
 
@@ -59,6 +58,8 @@ poly-monitor start --task <task_name> # production mode: background worker + ter
 Just enjoy and see whether your information sources can actually help OpenClaw make some lucky shots！
 ![alt text](images/image.png)
 `poly-monitor start --task <your task name>` starts the background worker plus dashboard.
+## Place Orders
++ Run `clawhub install polymarket-minimal-buy-python` to install the skill directly from ClawHub to enable its transaction ability(we will update this skill as well).Then configure the private key in the installed skill folder.Or you can ask openclaw to write ordering skills for you.
 
 
 ## Unified Architecture + User Guide
